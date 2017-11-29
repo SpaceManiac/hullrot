@@ -30,7 +30,7 @@ impl Client {
         let mut version = Version::new();
         version.set_version(66304);
         version.set_release(concat!("Hullrot v", env!("CARGO_PKG_VERSION")).to_owned());
-        sender.send(version).unwrap();
+        sender.send(version);
 
         Client {
             remote,
@@ -55,9 +55,11 @@ impl net::Handler for Client {
     type Error = String;
 
     fn handle(&mut self, packet: Packet) -> Result<(), Self::Error> {
+        use mumble_protocol::*;
+
         // reply to pings
         match packet {
-            Packet::Ping(_) => return Ok(self.sender.send(packet).unwrap()),
+            Packet::Ping(_) => { self.sender.send(packet); return Ok(()) },
             _ => {}
         }
         println!("{:?}", packet);
@@ -65,13 +67,40 @@ impl net::Handler for Client {
         // state handling
         match packet {
             Packet::Authenticate(auth) => {
-                if !auth.has_username() {
+                // Accept the username
+                let name = auth.get_username();
+                if !auth.has_username() || name.is_empty() {
                     return Err("No username".into());
+                }
+                if self.username.is_some() {
+                    return Err("Double-login".into());
                 }
                 if !auth.get_opus() {
                     return Err("No Opus support".into());
                 }
-                self.username = Some(auth.get_username().to_owned());
+                println!("({}) logged in as {}", self.remote, name);
+                self.username = Some(name.to_owned());
+
+                // TODO: UDP crypto setup
+
+                // Channel states
+                let mut channel_state = ChannelState::new();
+                channel_state.set_name("Hullrot".into());
+                channel_state.set_description("Description here".into());
+                self.sender.send(channel_state);
+
+                // TODO: user states
+
+                // Indicate we are done with the channel info
+                /*let mut server_sync = ServerSync::new();
+                server_sync.set_session(1);
+                server_sync.set_max_bandwidth(72000);
+                server_sync.set_welcome_text("Welcome to Hullrot.".into());
+                self.sender.send(server_sync);*/
+
+                let mut text_message = TextMessage::new();
+                text_message.set_message("Borpo".into());
+                self.sender.send(text_message);
             }
             _ => {}
         }

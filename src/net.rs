@@ -149,8 +149,8 @@ pub struct PacketChannel(mpsc::Sender<Packet>);
 
 impl PacketChannel {
     #[inline]
-    pub fn send<T: Into<Packet>>(&self, message: T) -> Result<(), mpsc::SendError<Packet>> {
-        self.0.send(message.into())
+    pub fn send<T: Into<Packet>>(&self, message: T) -> bool {
+        self.0.send(message.into()).is_ok()
     }
 
     /*#[inline]
