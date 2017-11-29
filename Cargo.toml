@@ -1,0 +1,12 @@
+[package]
+name = "hullrot"
+version = "0.1.0"
+authors = ["Tad Hardesty <tad@platymuus.com>"]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[profile.release]
+lto = true
+
+[dependencies]
