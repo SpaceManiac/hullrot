@@ -57,18 +57,7 @@ pub fn server_thread() {
                     poll.register(&stream, token, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
 
                     let ssl = Ssl::new(&ctx).unwrap();
-                    let stream = match ssl.accept(stream) {
-                        Ok(stream) => Stream::Active(stream),
-                        Err(HandshakeError::SetupFailure(e)) => {
-                            println!("SetupFailure A: {:?}", e);
-                            continue;
-                        }
-                        Err(HandshakeError::Failure(mid)) => {
-                            println!("Failure A: {:?}", mid);
-                            continue;
-                        }
-                        Err(HandshakeError::Interrupted(mid)) => Stream::Handshaking(mid),
-                    };
+                    let stream = Stream::new(ssl.accept(stream));
 
                     let (tx, rx) = mpsc::channel();
                     clients.insert(token, Connection {
@@ -166,20 +155,24 @@ enum Stream {
 }
 
 impl Stream {
+    fn new(res: Result<SslStream<TcpStream>, HandshakeError<TcpStream>>) -> Stream {
+        match res {
+            Ok(stream) => Stream::Active(stream),
+            Err(HandshakeError::SetupFailure(e)) => {
+                println!("SetupFailure: {:?}", e);
+                Stream::Invalid
+            }
+            Err(HandshakeError::Failure(mid)) => {
+                println!("Failure: {:?}", mid);
+                Stream::Invalid
+            }
+            Err(HandshakeError::Interrupted(mid)) => Stream::Handshaking(mid),
+        }
+    }
+
     fn resolve(&mut self) -> Option<&mut SslStream<TcpStream>> {
         *self = match mem::replace(self, Stream::Invalid) {
-            Stream::Handshaking(mid) => match mid.handshake() {
-                Ok(stream) => Stream::Active(stream),
-                Err(HandshakeError::SetupFailure(e)) => {
-                    println!("SetupFailure B: {:?}", e);
-                    Stream::Invalid
-                }
-                Err(HandshakeError::Failure(mid)) => {
-                    println!("Failure B: {:?}", mid);
-                    Stream::Invalid
-                }
-                Err(HandshakeError::Interrupted(mid)) => Stream::Handshaking(mid),
-            },
+            Stream::Handshaking(mid) => Stream::new(mid.handshake()),
             other => other,
         };
         match *self {
