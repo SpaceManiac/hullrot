@@ -6,9 +6,11 @@ use std::mem;
 use mio::*;
 use mio::net::*;
 
-use openssl;
 use openssl::ssl::*;
 use openssl::x509;
+
+use mumble_protocol::Packet;
+use Client;
 
 // ----------------------------------------------------------------------------
 // Main server thread
@@ -48,7 +50,7 @@ pub fn server_thread() {
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
                         Err(e) => panic!("{:?}", e),
                     };
-                    println!("connected: {}", remote);
+                    println!("({}) connected", remote);
 
                     let token = Token(next_token);
                     next_token = next_token.checked_add(1).expect("token overflow");
@@ -58,22 +60,24 @@ pub fn server_thread() {
                     let stream = match ssl.accept(stream) {
                         Ok(stream) => Stream::Active(stream),
                         Err(HandshakeError::SetupFailure(e)) => {
-                            println!("SetupFailure: {:?}", e);
+                            println!("SetupFailure A: {:?}", e);
                             continue;
                         }
                         Err(HandshakeError::Failure(mid)) => {
-                            println!("Failure: {:?}", mid);
+                            println!("Failure A: {:?}", mid);
                             continue;
                         }
                         Err(HandshakeError::Interrupted(mid)) => Stream::Handshaking(mid),
                     };
 
+                    let (tx, rx) = mpsc::sync_channel(1);
                     clients.insert(token, Connection {
                         stream,
-                        remote,
                         read_buf: BufReader::new(),
                         write_buf: BufWriter::new(),
-                        dropped: String::new(),
+                        write_rx: rx,
+                        //write_tx: tx.clone(),
+                        client: Client::new(remote, PacketChannel(tx)),
                     });
                 }
             } else {
@@ -84,10 +88,10 @@ pub fn server_thread() {
                 }
                 if readiness.is_readable() {
                     if let Some(stream) = connection.stream.resolve() {
-                        match read_packets(&mut connection.read_buf.with(stream)) {
+                        match read_packets(&mut connection.read_buf.with(stream), &mut connection.client) {
                             Ok(()) => {},
                             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
-                            Err(e) => connection.dropped = e.to_string(),
+                            Err(e) => connection.client.disconnected = Some(e.to_string()),
                         }
                     }
                 }
@@ -100,31 +104,41 @@ pub fn server_thread() {
                 connection.stream.resolve();
                 let stream = match connection.stream {
                     Stream::Active(ref mut stream) => stream,
-                    Stream::Invalid => { connection.dropped = "SSL setup failure".to_owned(); break },
+                    Stream::Invalid => {
+                        connection.client.disconnected = Some("SSL setup failure".to_owned());
+                        break
+                    },
                     _ => break,
                 };
 
                 if !connection.write_buf.buf.is_empty() {
                     match connection.write_buf.with(stream).flush_buf() {
                         Ok(()) => {}
-                        Err(e) => connection.dropped = e.to_string(),
+                        Err(e) => connection.client.disconnected = Some(e.to_string()),
                     }
                     break;
-                /*} else if let Ok(message) = connection.write_rx.try_recv() {
-                    match connection.write_buf.with(stream).write_all(&message) {
-                        Ok(()) => {}
+                } else if let Ok(message) = connection.write_rx.try_recv() {
+                    let encoded = match message.encode() {
+                        Ok(v) => v,
                         Err(e) => {
-                            connection.client.disconnected = Some(error_message(e));
+                            connection.client.disconnected = Some(e.to_string());
                             break;
                         }
-                    }*/
+                    };
+                    match connection.write_buf.with(stream).write_all(&encoded) {
+                        Ok(()) => {}
+                        Err(e) => {
+                            connection.client.disconnected = Some(e.to_string());
+                            break;
+                        }
+                    }
                 } else {
                     break
                 }
             }
 
-            if !connection.dropped.is_empty() {
-                println!("({}) quit: {}", connection.remote, connection.dropped);
+            if let Some(ref message) = connection.client.disconnected {
+                println!("{} quit: {}", connection.client, message);
                 false
             } else {
                 true
@@ -135,6 +149,21 @@ pub fn server_thread() {
 
 // ----------------------------------------------------------------------------
 // Support
+
+#[derive(Clone, Debug)]
+pub struct PacketChannel(mpsc::SyncSender<Packet>);
+
+impl PacketChannel {
+    #[inline]
+    pub fn send(&self, message: Packet) -> Result<(), mpsc::SendError<Packet>> {
+        self.0.send(message)
+    }
+
+    #[inline]
+    pub fn try_send(&self, message: Packet) -> Result<(), mpsc::TrySendError<Packet>> {
+        self.0.try_send(message)
+    }
+}
 
 enum Stream {
     Invalid,
@@ -148,11 +177,11 @@ impl Stream {
             Stream::Handshaking(mid) => match mid.handshake() {
                 Ok(stream) => Stream::Active(stream),
                 Err(HandshakeError::SetupFailure(e)) => {
-                    println!("2 SetupFailure: {:?}", e);
+                    println!("SetupFailure B: {:?}", e);
                     Stream::Invalid
                 }
                 Err(HandshakeError::Failure(mid)) => {
-                    println!("2 Failure: {:?}", mid);
+                    println!("Failure B: {:?}", mid);
                     Stream::Invalid
                 }
                 Err(HandshakeError::Interrupted(mid)) => Stream::Handshaking(mid),
@@ -168,15 +197,14 @@ impl Stream {
 
 struct Connection {
     stream: Stream,
-    remote: ::std::net::SocketAddr,
     read_buf: BufReader,
     write_buf: BufWriter,
-    //write_rx: mpsc::Receiver<Packet>,
+    write_rx: mpsc::Receiver<Packet>,
     //write_tx: mpsc::SyncSender<Packet>,
-    dropped: String,
+    client: Client,
 }
 
-fn read_packets<R: BufRead + ?Sized>(read: &mut R) -> io::Result<()> {
+fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H) -> io::Result<()> {
     use byteorder::{BigEndian, ReadBytesExt};
     use mumble_protocol::*;
 
@@ -194,14 +222,22 @@ fn read_packets<R: BufRead + ?Sized>(read: &mut R) -> io::Result<()> {
                 if buffer.len() < len {
                     break;  // incomplete
                 }
-
-                println!("{:?}", Packet::parse(ty, &buffer[6..len]));
-
+                if let Err(e) = handler.handle(Packet::parse(ty, &buffer[6..len])?) {
+                    return handler.error(e);
+                }
                 consumed += len;
                 buffer = &buffer[len..];
             }
         }
         read.consume(consumed);
+    }
+}
+
+pub trait Handler {
+    type Error;
+    fn handle(&mut self, packet: Packet) -> Result<(), Self::Error>;
+    fn error(&mut self, _error: Self::Error) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Other, "Internal server error"))
     }
 }
 

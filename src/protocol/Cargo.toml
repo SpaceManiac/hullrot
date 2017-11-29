@@ -7,6 +7,7 @@ path = "lib.rs"
 
 [dependencies]
 protobuf = "1.4.2"
+byteorder = "1.1.0"
 
 [build-dependencies]
 protoc-rust = "1.4.2"

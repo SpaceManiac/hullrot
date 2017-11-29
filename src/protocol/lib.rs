@@ -1,4 +1,6 @@
 pub extern crate protobuf;
+extern crate byteorder;
+
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 pub use generated::*;
 
@@ -15,6 +17,21 @@ macro_rules! packets {
                     $($num => protobuf::parse_from_bytes::<$name>(buf).map(Packet::$name),)*
                     _ => Err(protobuf::ProtobufError::message_not_initialized("unknown opcode"))
                 }
+            }
+
+            pub fn encode(&self) -> protobuf::ProtobufResult<Vec<u8>> {
+                use byteorder::{BigEndian, WriteBytesExt};
+                use protobuf::Message;
+
+                let mut result = Vec::new();
+                match *self {
+                    $(Packet::$name(ref inner) => {
+                        result.write_u16::<BigEndian>($num)?;
+                        result.write_u32::<BigEndian>(inner.compute_size())?;
+                        inner.write_to_vec(&mut result)?;
+                    })*
+                }
+                Ok(result)
             }
         }
     }
