@@ -70,9 +70,10 @@ pub fn server_thread() {
 
                     clients.insert(token, Connection {
                         stream,
+                        remote,
                         read_buf: BufReader::new(),
                         write_buf: BufWriter::new(),
-                        dropped: false,
+                        dropped: String::new(),
                     });
                 }
             } else {
@@ -86,10 +87,7 @@ pub fn server_thread() {
                         match read_packets(&mut connection.read_buf.with(stream)) {
                             Ok(()) => {},
                             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
-                            Err(e) => {
-                                println!("{:?}", e);
-                                connection.dropped = true;
-                            }
+                            Err(e) => connection.dropped = e.to_string(),
                         }
                     }
                 }
@@ -102,18 +100,14 @@ pub fn server_thread() {
                 connection.stream.resolve();
                 let stream = match connection.stream {
                     Stream::Active(ref mut stream) => stream,
-                    Stream::Invalid => { connection.dropped = true; break },
+                    Stream::Invalid => { connection.dropped = "SSL setup failure".to_owned(); break },
                     _ => break,
                 };
 
                 if !connection.write_buf.buf.is_empty() {
                     match connection.write_buf.with(stream).flush_buf() {
                         Ok(()) => {}
-                        Err(e) => {
-                            // TODO: store the error message nicely
-                            println!("{:?}", e);
-                            connection.dropped = true;
-                        }
+                        Err(e) => connection.dropped = e.to_string(),
                     }
                     break;
                 /*} else if let Ok(message) = connection.write_rx.try_recv() {
@@ -129,7 +123,12 @@ pub fn server_thread() {
                 }
             }
 
-            !connection.dropped
+            if !connection.dropped.is_empty() {
+                println!("({}) quit: {}", connection.remote, connection.dropped);
+                false
+            } else {
+                true
+            }
         })
     }
 }
@@ -169,17 +168,17 @@ impl Stream {
 
 struct Connection {
     stream: Stream,
+    remote: ::std::net::SocketAddr,
     read_buf: BufReader,
     write_buf: BufWriter,
     //write_rx: mpsc::Receiver<Packet>,
     //write_tx: mpsc::SyncSender<Packet>,
-    dropped: bool,
+    dropped: String,
 }
 
 fn read_packets<R: BufRead + ?Sized>(read: &mut R) -> io::Result<()> {
     use byteorder::{BigEndian, ReadBytesExt};
     use mumble_protocol::*;
-    use mumble_protocol::protobuf::parse_from_bytes;
 
     loop {
         let mut consumed = 0;
@@ -196,12 +195,7 @@ fn read_packets<R: BufRead + ?Sized>(read: &mut R) -> io::Result<()> {
                     break;  // incomplete
                 }
 
-                match ty {
-                    0 => {
-                        println!("{:?}", parse_from_bytes::<Version>(&buffer[6..len]).unwrap());
-                    }
-                    _ => panic!("uh oh {}", ty),
-                }
+                println!("{:?}", Packet::parse(ty, &buffer[6..len]));
 
                 consumed += len;
                 buffer = &buffer[len..];
