@@ -25,6 +25,13 @@ struct Client {
 
 impl Client {
     fn new(remote: std::net::SocketAddr, sender: net::PacketChannel) -> Client {
+        use mumble_protocol::*;
+
+        let mut version = Version::new();
+        version.set_version(66304);
+        version.set_release(concat!("Hullrot v", env!("CARGO_PKG_VERSION")).to_owned());
+        sender.send(version).unwrap();
+
         Client {
             remote,
             sender,
@@ -45,7 +52,7 @@ impl std::fmt::Display for Client {
 }
 
 impl net::Handler for Client {
-    type Error = ();
+    type Error = String;
 
     fn handle(&mut self, packet: Packet) -> Result<(), Self::Error> {
         // reply to pings
@@ -55,11 +62,25 @@ impl net::Handler for Client {
         }
         println!("{:?}", packet);
 
+        // state handling
+        match packet {
+            Packet::Authenticate(auth) => {
+                if !auth.has_username() {
+                    return Err("No username".into());
+                }
+                if !auth.get_opus() {
+                    return Err("No Opus support".into());
+                }
+                self.username = Some(auth.get_username().to_owned());
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 
-    fn error(&mut self, _: ()) -> std::io::Result<()> {
-        self.disconnected = Some("Terminated".into());
+    fn error(&mut self, msg: String) -> std::io::Result<()> {
+        self.disconnected = Some(msg);
         Err(std::io::ErrorKind::BrokenPipe.into())
     }
 }

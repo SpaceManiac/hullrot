@@ -70,7 +70,7 @@ pub fn server_thread() {
                         Err(HandshakeError::Interrupted(mid)) => Stream::Handshaking(mid),
                     };
 
-                    let (tx, rx) = mpsc::sync_channel(1);
+                    let (tx, rx) = mpsc::channel();
                     clients.insert(token, Connection {
                         stream,
                         read_buf: BufReader::new(),
@@ -91,7 +91,7 @@ pub fn server_thread() {
                         match read_packets(&mut connection.read_buf.with(stream), &mut connection.client) {
                             Ok(()) => {},
                             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
-                            Err(e) => connection.client.disconnected = Some(e.to_string()),
+                            Err(e) => io_error(&mut connection.client, e),
                         }
                     }
                 }
@@ -105,7 +105,7 @@ pub fn server_thread() {
                 let stream = match connection.stream {
                     Stream::Active(ref mut stream) => stream,
                     Stream::Invalid => {
-                        connection.client.disconnected = Some("SSL setup failure".to_owned());
+                        kick(&mut connection.client, "SSL setup failure".to_owned());
                         break
                     },
                     _ => break,
@@ -114,23 +114,17 @@ pub fn server_thread() {
                 if !connection.write_buf.buf.is_empty() {
                     match connection.write_buf.with(stream).flush_buf() {
                         Ok(()) => {}
-                        Err(e) => connection.client.disconnected = Some(e.to_string()),
+                        Err(e) => io_error(&mut connection.client, e),
                     }
                     break;
                 } else if let Ok(message) = connection.write_rx.try_recv() {
                     let encoded = match message.encode() {
                         Ok(v) => v,
-                        Err(e) => {
-                            connection.client.disconnected = Some(e.to_string());
-                            break;
-                        }
+                        Err(e) => { kick(&mut connection.client, e.to_string()); break }
                     };
                     match connection.write_buf.with(stream).write_all(&encoded) {
                         Ok(()) => {}
-                        Err(e) => {
-                            connection.client.disconnected = Some(e.to_string());
-                            break;
-                        }
+                        Err(e) => { io_error(&mut connection.client, e); break }
                     }
                 } else {
                     break
@@ -151,18 +145,18 @@ pub fn server_thread() {
 // Support
 
 #[derive(Clone, Debug)]
-pub struct PacketChannel(mpsc::SyncSender<Packet>);
+pub struct PacketChannel(mpsc::Sender<Packet>);
 
 impl PacketChannel {
     #[inline]
-    pub fn send(&self, message: Packet) -> Result<(), mpsc::SendError<Packet>> {
-        self.0.send(message)
+    pub fn send<T: Into<Packet>>(&self, message: T) -> Result<(), mpsc::SendError<Packet>> {
+        self.0.send(message.into())
     }
 
-    #[inline]
-    pub fn try_send(&self, message: Packet) -> Result<(), mpsc::TrySendError<Packet>> {
-        self.0.try_send(message)
-    }
+    /*#[inline]
+    pub fn try_send<T: Into<Packet>>(&self, message: T) -> Result<(), mpsc::TrySendError<Packet>> {
+        self.0.try_send(message.into())
+    }*/
 }
 
 enum Stream {
@@ -202,6 +196,21 @@ struct Connection {
     write_rx: mpsc::Receiver<Packet>,
     //write_tx: mpsc::SyncSender<Packet>,
     client: Client,
+}
+
+fn kick(c: &mut Client, why: String) {
+    if c.disconnected.is_none() {
+        c.disconnected = Some(why);
+    }
+}
+
+fn io_error(c: &mut Client, e: io::Error) {
+    use std::io::ErrorKind::*;
+    kick(c, if [ConnectionAborted, ConnectionReset, UnexpectedEof].contains(&e.kind()) {
+        "Disconnected".to_owned()
+    } else {
+        e.to_string()
+    })
 }
 
 fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H) -> io::Result<()> {

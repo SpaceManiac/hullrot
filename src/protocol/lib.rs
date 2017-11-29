@@ -34,6 +34,12 @@ macro_rules! packets {
                 Ok(result)
             }
         }
+
+        $(impl From<$name> for Packet {
+            fn from(inner: $name) -> Packet {
+                Packet::$name(inner)
+            }
+        })*
     }
 }
 packets! {
