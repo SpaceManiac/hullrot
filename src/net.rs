@@ -107,9 +107,13 @@ pub fn server_thread() {
                     }
                     break;
                 } else if let Ok(message) = connection.write_rx.try_recv() {
+                    match message {
+                        ::mumble_protocol::Packet::Ping(_) => {}
+                        _ => println!("--> {:?}", message),
+                    }
                     let encoded = match message.encode() {
                         Ok(v) => v,
-                        Err(e) => { kick(&mut connection.client, e.to_string()); break }
+                        Err(e) => { kick(&mut connection.client, format!("Encode error: {}", e)); break }
                     };
                     match connection.write_buf.with(stream).write_all(&encoded) {
                         Ok(()) => {}
