@@ -1,0 +1,12 @@
+[package]
+name = "mumble-protocol"
+version = "0.0.0"
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+protobuf = "1.4.2"
+
+[build-dependencies]
+protoc-rust = "1.4.2"
