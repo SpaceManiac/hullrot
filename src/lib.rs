@@ -5,10 +5,22 @@ extern crate mio;
 extern crate openssl;
 extern crate byteorder;
 extern crate mumble_protocol;
+extern crate serde;
+extern crate serde_json;
+#[macro_use] extern crate serde_derive;
 
+pub mod ffi;
 pub mod net;
 
 use mumble_protocol::Packet;
+
+macro_rules! packet {
+    ($ty:path; $($name:ident: $value:expr,)*) => {{
+        let mut packet = <$ty>::new();
+        $(packet.$name($value);)*
+        packet
+    }}
+}
 
 pub fn hello() {
     net::server_thread();
@@ -83,51 +95,44 @@ impl net::Handler for Client {
                 println!("({}) logged in as {}", self.remote, name);
                 self.username = Some(name.to_owned());
 
-                let mut crypt_setup = CryptSetup::new();
-                crypt_setup.set_key(vec![0; 16]);
-                crypt_setup.set_client_nonce(vec![0; 16]);
-                crypt_setup.set_server_nonce(vec![0; 16]);
-                self.sender.send(crypt_setup);
-
-                let mut codec_version = CodecVersion::new();
-                codec_version.set_alpha(-2147483637);
-                codec_version.set_beta(0);
-                codec_version.set_prefer_alpha(true);
-                codec_version.set_opus(false);
-                self.sender.send(codec_version);
-
-                let mut channel_state = ChannelState::new();
-                channel_state.set_channel_id(0);
-                channel_state.set_name("Root".into());
-                channel_state.set_position(0);
-                //channel_state.set_description("Description here".into());
-                channel_state.set_max_users(0);
-                self.sender.send(channel_state);
-
-                let mut permission_query = PermissionQuery::new();
-                permission_query.set_channel_id(0);
-                permission_query.set_permissions(PERMISSIONS);
-                self.sender.send(permission_query);
-
-                let mut user_state = UserState::new();
-                user_state.set_session(1);  // TODO
-                user_state.set_name(name.to_owned());
-                user_state.set_hash("0000000000000000000000000000000000000000".into());
-                self.sender.send(user_state);
-
-                let mut server_sync = ServerSync::new();
-                server_sync.set_session(1);
-                server_sync.set_max_bandwidth(72000);
-                server_sync.set_welcome_text("Welcome to Hullrot.".into());
-                server_sync.set_permissions(PERMISSIONS as u64);
-                self.sender.send(server_sync);
-
-                let mut server_config = ServerConfig::new();
-                server_config.set_allow_html(true);
-                server_config.set_message_length(5000);
-                server_config.set_image_message_length(131072);
-                server_config.set_max_users(100);
-                self.sender.send(server_config);
+                self.sender.send(packet! { CryptSetup;
+                    set_key: vec![0; 16],
+                    set_client_nonce: vec![0; 16],
+                    set_server_nonce: vec![0; 16],
+                });
+                self.sender.send(packet! { CodecVersion;
+                    set_alpha: -2147483637,
+                    set_beta: 0,
+                    set_prefer_alpha: true,
+                    set_opus: true,
+                });
+                self.sender.send(packet! { ChannelState;
+                    set_channel_id: 0,
+                    set_name: "Hullrot".into(),
+                    set_position: 0,
+                    set_max_users: 0,
+                });
+                self.sender.send(packet! { PermissionQuery;
+                    set_channel_id: 0,
+                    set_permissions: PERMISSIONS,
+                });
+                self.sender.send(packet! { UserState;
+                    set_session: 1,
+                    set_name: name.to_owned(),
+                    set_hash: "0000000000000000000000000000000000000000".into(),
+                });
+                self.sender.send(packet! { ServerSync;
+                    set_session: 1,
+                    set_max_bandwidth: 72000,
+                    set_welcome_text: "Welcome to Hullrot.".into(),
+                    set_permissions: PERMISSIONS as u64,
+                });
+                self.sender.send(packet! { ServerConfig;
+                    set_allow_html: true,
+                    set_message_length: 5000,
+                    set_image_message_length: 131072,
+                    set_max_users: 100,
+                });
             }
             _ => {}
         }

@@ -14,4 +14,7 @@ libc = "0.2.0"
 mio = "0.6.11"
 openssl = "0.9.21"
 byteorder = "1.1.0"
+serde = "1.0.21"
+serde_derive = "1.0.21"
+serde_json = "1.0.6"
 mumble-protocol = { path = "src/protocol" }
