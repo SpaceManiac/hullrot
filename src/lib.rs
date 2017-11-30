@@ -69,8 +69,6 @@ impl net::Handler for Client {
     fn handle(&mut self, packet: Packet) -> Result<(), Self::Error> {
         use mumble_protocol::*;
 
-        const PERMISSIONS: u32 = 134742798;
-
         // reply to pings
         match packet {
             Packet::Ping(_) => { self.sender.send(packet); return Ok(()) },
@@ -114,7 +112,7 @@ impl net::Handler for Client {
                 });
                 self.sender.send(packet! { PermissionQuery;
                     set_channel_id: 0,
-                    set_permissions: PERMISSIONS,
+                    set_permissions: Permissions::DEFAULT.bits(),
                 });
                 self.sender.send(packet! { UserState;
                     set_session: 1,
@@ -125,7 +123,7 @@ impl net::Handler for Client {
                     set_session: 1,
                     set_max_bandwidth: 72000,
                     set_welcome_text: "Welcome to Hullrot.".into(),
-                    set_permissions: PERMISSIONS as u64,
+                    set_permissions: Permissions::DEFAULT.bits() as u64,
                 });
                 self.sender.send(packet! { ServerConfig;
                     set_allow_html: true,

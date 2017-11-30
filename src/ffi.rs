@@ -27,6 +27,14 @@ fn json_response<T: Serialize + ?Sized>(t: &T) -> *const c_char {
     })
 }
 
+fn error<T: AsRef<str>>(msg: T) -> *const c_char {
+    #[derive(Serialize)]
+    struct Error<'a> {
+        error: &'a str,
+    }
+    json_response(&Error { error: msg.as_ref() })
+}
+
 unsafe fn parse_args<'a>(argc: c_int, argv: *const *const c_char) -> Vec<&'a str> {
     let mut args = Vec::new();
     for i in 0..argc as isize {
@@ -53,7 +61,14 @@ function! { hullrot_version(_args) {
     #[derive(Serialize)]
     struct Version {
         version: &'static str,
+        major: u32,
+        minor: u32,
+        patch: u32,
     }
-
-    json_response(&Version { version: env!("CARGO_PKG_VERSION") })
+    json_response(&Version {
+        version: env!("CARGO_PKG_VERSION"),
+        major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
+        minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
+        patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
+    })
 }}
