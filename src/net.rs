@@ -15,6 +15,7 @@ use openssl::x509;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use mumble_protocol::Packet;
+use opus::{Channels, Application, Decoder, Encoder};
 use Client;
 
 // ----------------------------------------------------------------------------
@@ -41,8 +42,8 @@ pub fn server_thread() {
 
     /*let udp = UdpSocket::bind(&addr).unwrap();
     poll.register(&udp, UDP_SOCKET, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
-    let mut udp_writeable = true;
-    let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit*/
+    let mut udp_writeable = true;*/
+    let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit
 
     let mut clients = HashMap::new();
     let mut events = Events::with_capacity(1024);
@@ -79,6 +80,8 @@ pub fn server_thread() {
                         write_rx: rx,
                         //write_tx: tx.clone(),
                         client: Client::new(remote, PacketChannel(tx), session),
+                        encoder: Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION).unwrap(),
+                        decoder: Decoder::new(SAMPLE_RATE, CHANNELS).unwrap(),
                     });
                 }
             /*} else if event.token() == UDP_SOCKET {
@@ -106,7 +109,7 @@ pub fn server_thread() {
                 }
                 if readiness.is_readable() {
                     if let Some(stream) = connection.stream.resolve() {
-                        match read_packets(&mut connection.read_buf.with(stream), &mut connection.client) {
+                        match read_packets(&mut connection.read_buf.with(stream), &mut connection.client, &mut connection.decoder) {
                             Ok(()) => {},
                             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
                             Err(e) => io_error(&mut connection.client, e),
@@ -135,18 +138,51 @@ pub fn server_thread() {
                         Err(e) => io_error(&mut connection.client, e),
                     }
                     break;
-                } else if let Ok(message) = connection.write_rx.try_recv() {
-                    match message {
-                        ::mumble_protocol::Packet::Ping(_) => {}
-                        _ => println!("--> {:?}", message),
-                    }
-                    let encoded = match message.encode() {
-                        Ok(v) => v,
-                        Err(e) => { kick(&mut connection.client, format!("Encode error: {}", e)); break }
-                    };
-                    match connection.write_buf.with(stream).write_all(&encoded) {
-                        Ok(()) => {}
-                        Err(e) => { io_error(&mut connection.client, e); break }
+                } else if let Ok(command) = connection.write_rx.try_recv() {
+                    match command {
+                        Command::Packet(packet) => {
+                            match packet {
+                                Packet::Ping(_) => {}
+                                _ => println!("OUT: {:?}", packet)
+                            }
+                            let encoded = match packet.encode() {
+                                Ok(v) => v,
+                                Err(e) => { kick(&mut connection.client, format!("Encode error: {}", e)); break }
+                            };
+                            match connection.write_buf.with(stream).write_all(&encoded) {
+                                Ok(()) => {}
+                                Err(e) => { io_error(&mut connection.client, e); break }
+                            }
+                        }
+                        Command::VoiceData { who, seq, audio } => {
+                            // Encode the audio
+                            let len = connection.encoder.encode(&audio, &mut udp_buf).unwrap();
+
+                            // Construct the UDPTunnel packet
+                            let mut encoded = Vec::new();
+                            let _ = encoded.write_u16::<BigEndian>(2);  // UDP tunnel
+                            let _ = encoded.write_u32::<BigEndian>(0);  // Placeholder for length
+
+                            // Construct the voice datagram
+                            let start = encoded.len();
+                            let _ = encoded.write_u8(128 | 31);  // header byte, opus on normal channel
+                            let _ = write_varint(&mut encoded, who as i64);  // session of source user
+                            let _ = write_varint(&mut encoded, seq);  // sequence number
+                            let _ = write_varint(&mut encoded, len as i64);  // opus header
+                            let total_len = encoded.len() + len - start;
+                            let _ = (&mut encoded[2..6]).write_u32::<BigEndian>(total_len as u32);
+
+                            let mut out = connection.write_buf.with(stream);
+                            match (|| {
+                                out.write_all(&encoded)?;
+                                out.write_all(&udp_buf[..len])
+                            })() {
+                                Ok(()) => {
+                                    println!("OUT: voice: who={} seq={} audio={}", who, seq, audio.len());
+                                }
+                                Err(e) => { io_error(&mut connection.client, e); break }
+                            }
+                        }
                     }
                 } else {
                     break
@@ -166,19 +202,32 @@ pub fn server_thread() {
 // ----------------------------------------------------------------------------
 // Support
 
+const SAMPLE_RATE: u32 = 48000;
+const CHANNELS: Channels = Channels::Mono;
+const APPLICATION: Application = Application::Voip;
+
 #[derive(Clone, Debug)]
-pub struct PacketChannel(mpsc::Sender<Packet>);
+pub struct PacketChannel(mpsc::Sender<Command>);
+
+enum Command {
+    Packet(Packet),
+    VoiceData {
+        who: u32,
+        seq: i64,
+        audio: Vec<i16>,
+    },
+}
 
 impl PacketChannel {
     #[inline]
     pub fn send<T: Into<Packet>>(&self, message: T) -> bool {
-        self.0.send(message.into()).is_ok()
+        self.0.send(Command::Packet(message.into())).is_ok()
     }
 
-    /*#[inline]
-    pub fn try_send<T: Into<Packet>>(&self, message: T) -> Result<(), mpsc::TrySendError<Packet>> {
-        self.0.try_send(message.into())
-    }*/
+    #[inline]
+    pub fn send_voice(&self, who: u32, seq: i64, audio: Vec<i16>) -> bool {
+        self.0.send(Command::VoiceData { who, seq, audio }).is_ok()
+    }
 }
 
 enum Stream {
@@ -219,9 +268,11 @@ struct Connection {
     stream: Stream,
     read_buf: BufReader,
     write_buf: BufWriter,
-    write_rx: mpsc::Receiver<Packet>,
+    write_rx: mpsc::Receiver<Command>,
     //write_tx: mpsc::SyncSender<Packet>,
     client: Client,
+    decoder: Decoder,
+    encoder: Encoder,
 }
 
 fn kick(c: &mut Client, why: String) {
@@ -239,7 +290,7 @@ fn io_error(c: &mut Client, e: io::Error) {
     })
 }
 
-fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H) -> io::Result<()> {
+fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H, decoder: &mut Decoder) -> io::Result<()> {
     use mumble_protocol::*;
 
     loop {
@@ -257,7 +308,7 @@ fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H) 
                     break;  // incomplete
                 }
                 if ty == 1 {  // UdpTunnel
-                    read_voice(&buffer[6..len], handler)?;
+                    read_voice(&buffer[6..len], handler, decoder)?;
                 } else if let Err(e) = handler.handle(Packet::parse(ty, &buffer[6..len])?) {
                     return handler.error(e);
                 }
@@ -269,7 +320,7 @@ fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H) 
     }
 }
 
-fn read_voice<H: Handler>(mut buffer: &[u8], handler: &mut H) -> io::Result<()> {
+fn read_voice<H: Handler>(mut buffer: &[u8], handler: &mut H, decoder: &mut Decoder) -> io::Result<()> {
     //const CELT_ALPHA: u8 = 0;
     const PING: u8 = 1;
     //const SPEEX: u8 = 2;
@@ -299,16 +350,21 @@ fn read_voice<H: Handler>(mut buffer: &[u8], handler: &mut H) -> io::Result<()> 
     if terminator {
         opus_length &= 0x1fff;
     }
-    println!("Opus frame: seq={} len1={} len2={}", sequence_number, opus_length, buffer.len());
+    let opus_packet = &buffer[..opus_length as usize];
 
-    handler.handle_voice().or_else(|e| handler.error(e))
+    let mut output = [0i16; 960 * 2];
+    let len = decoder.decode(opus_packet, &mut output, false).unwrap();
+
+    println!("IN: voice: seq={} len1={} len2={}", sequence_number, opus_length, len);
+
+    handler.handle_voice(sequence_number, &output[..len]).or_else(|e| handler.error(e))
 }
 
 #[allow(unused_variables)]
 pub trait Handler {
     type Error;
     fn handle(&mut self, packet: Packet) -> Result<(), Self::Error> { Ok(()) }
-    fn handle_voice(&mut self) -> Result<(), Self::Error> { Ok(()) }
+    fn handle_voice(&mut self, seq: i64, samples: &[i16]) -> Result<(), Self::Error> { Ok(()) }
     fn error(&mut self, error: Self::Error) -> io::Result<()> {
         Err(io::Error::new(io::ErrorKind::Other, "Internal server error"))
     }

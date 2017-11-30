@@ -5,6 +5,7 @@ extern crate mio;
 extern crate openssl;
 extern crate byteorder;
 extern crate mumble_protocol;
+extern crate opus;
 extern crate serde;
 extern crate serde_json;
 #[macro_use] extern crate serde_derive;
@@ -88,10 +89,15 @@ impl net::Handler for Client {
 
         // reply to pings
         match packet {
-            Packet::Ping(_) => { self.sender.send(packet); return Ok(()) },
+            Packet::Ping(ping) => {
+                self.sender.send(packet! { Ping;
+                    set_timestamp: ping.get_timestamp(),
+                });
+                return Ok(())
+            },
             _ => {}
         }
-        println!("{:?}", packet);
+        println!("IN: {:?}", packet);
 
         // state handling
         match packet {
@@ -152,6 +158,11 @@ impl net::Handler for Client {
             _ => {}
         }
 
+        Ok(())
+    }
+
+    fn handle_voice(&mut self, seq: i64, voice: &[i16]) -> Result<(), Self::Error> {
+        self.sender.send_voice(self.session, seq, voice.to_owned());
         Ok(())
     }
 
