@@ -12,7 +12,7 @@ use mio::net::*;
 use openssl::ssl::*;
 use openssl::x509;
 
-use byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use mumble_protocol::Packet;
 use Client;
@@ -294,7 +294,12 @@ fn read_voice<H: Handler>(mut buffer: &[u8], handler: &mut H) -> io::Result<()> 
 
     // incoming format
     let sequence_number = read_varint(&mut buffer)?;
-    println!("Opus frame: seq={} len={}", sequence_number, buffer.len());
+    let mut opus_length = read_varint(&mut buffer)? & 0x3fff;
+    let terminator = opus_length & 0x2000 != 0;
+    if terminator {
+        opus_length &= 0x1fff;
+    }
+    println!("Opus frame: seq={} len1={} len2={}", sequence_number, opus_length, buffer.len());
 
     handler.handle_voice().or_else(|e| handler.error(e))
 }
@@ -346,8 +351,40 @@ fn read_varint_inner<R: Read>(r: &mut R, recursive: bool) -> io::Result<i64> {
     }
 }
 
-fn write_varint<W: Write>(w: &mut W, val: i64) -> io::Result<()> {
-    unimplemented!()
+fn write_varint<W: Write>(w: &mut W, mut val: i64) -> io::Result<()> {
+    if val < 0 {  // negative
+        if val >= -4 {  // small value
+            return w.write_u8(0b11111100 | (!val as u8));
+        } else if val < -0xffffffff {  // large negative value
+            w.write_u8(0b11110100)?;  // 64-bit number
+            return w.write_i64::<BigEndian>(val);
+        } else {
+            w.write_u8(0b11111000)?;  // negative recursive varint
+            val = -val;
+        }
+    }
+    // positive
+    if val < (1 << 7) {  // 7-bit positive number
+        w.write_u8(val as u8)
+    } else if val < (1 << 14) {  // 14-bit positive number
+        w.write_u8(0b10000000 | (val >> 8) as u8)?;
+        w.write_u8(val as u8)
+    } else if val < (1 << 21) {  // 21-bit positive number
+        w.write_u8(0b11000000 | (val >> 16) as u8)?;
+        w.write_u8((val >> 8) as u8)?;
+        w.write_u8(val as u8)
+    } else if val < (1 << 28) {  // 28-bit positive number
+        w.write_u8(0b11100000 | (val >> 24) as u8)?;
+        w.write_u8((val >> 16) as u8)?;
+        w.write_u8((val >> 8) as u8)?;
+        w.write_u8(val as u8)
+    } else if val < (1 << 32) {  // 32-bit positive number
+        w.write_u8(0b11110000)?;
+        w.write_u32::<BigEndian>(val as u32)
+    } else {
+        w.write_u8(0b11110100)?;  // 64-bit number
+        w.write_i64::<BigEndian>(val)
+    }
 }
 
 // ----------------------------------------------------------------------------
