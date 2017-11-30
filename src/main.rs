@@ -1,5 +1,5 @@
 extern crate hullrot;
 
 fn main() {
-    hullrot::hello();
+    hullrot::Handle::init().unwrap().join();
 }

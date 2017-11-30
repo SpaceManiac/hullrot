@@ -5,7 +5,10 @@ use libc::{c_int, c_char};
 
 use serde::Serialize;
 
+use Handle;
+
 thread_local!(static OUTPUT_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::new()));
+thread_local!(static HANDLE: RefCell<Option<Handle>> = RefCell::new(None));
 
 fn with_output_buffer<F: FnOnce(&mut Vec<u8>)>(f: F) -> *const c_char {
     OUTPUT_BUFFER.with(|cell| {
@@ -35,6 +38,25 @@ fn error<T: AsRef<str>>(msg: T) -> *const c_char {
     json_response(&Error { error: msg.as_ref() })
 }
 
+fn ok() -> *const c_char {
+    #[derive(Serialize)]
+    struct Empty {}
+    json_response(&Empty {})
+}
+
+fn with_handle<F: FnOnce(&mut Handle) -> *const c_char>(f: F) -> *const c_char {
+    HANDLE.with(|cell| {
+        match cell.try_borrow_mut() {
+            Ok(mut opt) => match *opt {
+                Some(ref mut handle) => f(handle),
+                None => error("not initialized"),
+            },
+            Err(_) => error("context crashed"),
+        }
+    })
+}
+
+#[allow(dead_code)]
 unsafe fn parse_args<'a>(argc: c_int, argv: *const *const c_char) -> Vec<&'a str> {
     let mut args = Vec::new();
     for i in 0..argc as isize {
@@ -48,16 +70,16 @@ unsafe fn parse_args<'a>(argc: c_int, argv: *const *const c_char) -> Vec<&'a str
 }
 
 macro_rules! function {
-    ($name:ident($args:ident) $body:block) => {
+    ($name:ident($($args:ident)*) $body:block) => {
         #[no_mangle]
-        pub unsafe extern fn $name(argc: c_int, argv: *const *const c_char) -> *const c_char {
-            let $args = &parse_args(argc, argv)[..];
+        pub unsafe extern fn $name(_argc: c_int, _argv: *const *const c_char) -> *const c_char {
+            $(let $args = &parse_args(_argc, _argv)[..];)*
             $body
         }
     }
 }
 
-function! { hullrot_version(_args) {
+function! { hullrot_version() {
     #[derive(Serialize)]
     struct Version {
         version: &'static str,
@@ -71,4 +93,24 @@ function! { hullrot_version(_args) {
         minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
         patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
     })
+}}
+
+function! { hullrot_init() {
+    HANDLE.with(|cell| {
+        let mut opt = cell.borrow_mut();
+        if opt.is_some() {
+            return error("already initialized");
+        }
+        match Handle::init() {
+            Ok(handle) => {
+                *opt = Some(handle);
+                ok()
+            },
+            Err(why) => error(why),
+        }
+    })
+}}
+
+function! { hullrot_check_init() {
+    with_handle(|_| ok())
 }}

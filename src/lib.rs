@@ -22,8 +22,23 @@ macro_rules! packet {
     }}
 }
 
-pub fn hello() {
-    net::server_thread();
+/// A handle to a running Hullrot server.
+pub struct Handle {
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl Handle {
+    /// Attempt to initialize and spawn the server in its child thread.
+    pub fn init() -> Result<Handle, String> {
+        Ok(Handle {
+            thread: std::thread::spawn(net::server_thread),
+        })
+    }
+
+    /// Block until the server stops or crashes.
+    pub fn join(self) {
+        let _ = self.thread.join();
+    }
 }
 
 struct Client {
