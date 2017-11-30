@@ -47,11 +47,12 @@ struct Client {
     remote: std::net::SocketAddr,
     disconnected: Option<String>,
     // state
+    session: u32,
     username: Option<String>,
 }
 
 impl Client {
-    fn new(remote: std::net::SocketAddr, sender: net::PacketChannel) -> Client {
+    fn new(remote: std::net::SocketAddr, sender: net::PacketChannel, session: u32) -> Client {
         use mumble_protocol::*;
 
         let mut version = Version::new();
@@ -62,6 +63,7 @@ impl Client {
         Client {
             remote,
             sender,
+            session,
             disconnected: None,
             username: None,
         }
@@ -130,12 +132,12 @@ impl net::Handler for Client {
                     set_permissions: Permissions::DEFAULT.bits(),
                 });
                 self.sender.send(packet! { UserState;
-                    set_session: 1,
+                    set_session: self.session,
                     set_name: name.to_owned(),
                     set_hash: "0000000000000000000000000000000000000000".into(),
                 });
                 self.sender.send(packet! { ServerSync;
-                    set_session: 1,
+                    set_session: self.session,
                     set_max_bandwidth: 72000,
                     set_welcome_text: "Welcome to Hullrot.".into(),
                     set_permissions: Permissions::DEFAULT.bits() as u64,

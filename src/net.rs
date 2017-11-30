@@ -1,3 +1,6 @@
+// Server-side implementation of the Mumble protocol, documented online:
+// https://mumble-protocol.readthedocs.io/en/latest/overview.html
+
 use std::io::{self, Read, Write, BufRead};
 use std::sync::mpsc;
 use std::collections::HashMap;
@@ -9,6 +12,8 @@ use mio::net::*;
 use openssl::ssl::*;
 use openssl::x509;
 
+use byteorder::{BigEndian, ReadBytesExt};
+
 use mumble_protocol::Packet;
 use Client;
 
@@ -16,7 +21,9 @@ use Client;
 // Main server thread
 
 pub fn server_thread() {
-    const SERVER: Token = Token(0);
+    const TCP_SERVER: Token = Token(0);
+    //const UDP_SOCKET: Token = Token(1);
+    let mut next_token: u32 = 2;
 
     // TODO: audit
     let mut ctx = SslContext::builder(SslMethod::tls()).expect("failed: create ssl context");
@@ -30,9 +37,13 @@ pub fn server_thread() {
     let poll = Poll::new().unwrap();
     let addr = "0.0.0.0:64738".parse().unwrap();
     let server = TcpListener::bind(&addr).unwrap();
-    poll.register(&server, SERVER, Ready::readable(), PollOpt::edge()).unwrap();
+    poll.register(&server, TCP_SERVER, Ready::readable(), PollOpt::edge()).unwrap();
 
-    let mut next_token = 1;
+    /*let udp = UdpSocket::bind(&addr).unwrap();
+    poll.register(&udp, UDP_SOCKET, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
+    let mut udp_writeable = true;
+    let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit*/
+
     let mut clients = HashMap::new();
     let mut events = Events::with_capacity(1024);
 
@@ -41,18 +52,19 @@ pub fn server_thread() {
 
         // Check readiness events
         for event in events.iter() {
-            if event.token() == SERVER {
+            if event.token() == TCP_SERVER {
                 // Accept connections until we get a WouldBlock
                 loop {
                     let (stream, remote) = match server.accept() {
                         Ok(r) => r,
                         Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                        Err(e) => panic!("{:?}", e),
+                        Err(e) => { println!("{:?}", e); continue },
                     };
                     println!("({}) connected", remote);
 
-                    let token = Token(next_token);
+                    let session = next_token;
+                    let token = Token(session as usize);
                     next_token = next_token.checked_add(1).expect("token overflow");
                     poll.register(&stream, token, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
 
@@ -66,9 +78,26 @@ pub fn server_thread() {
                         write_buf: BufWriter::new(),
                         write_rx: rx,
                         //write_tx: tx.clone(),
-                        client: Client::new(remote, PacketChannel(tx)),
+                        client: Client::new(remote, PacketChannel(tx), session),
                     });
                 }
+            /*} else if event.token() == UDP_SOCKET {
+                let readiness = event.readiness();
+                if readiness.is_readable() {
+                    loop {
+                        let (len, remote) = match udp.recv_from(&mut udp_buf[..]) {
+                            Ok(r) => r,
+                            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                            Err(e) => { println!("{:?}", e); continue },
+                        };
+                        let buf = &udp_buf[..len];
+                        println!("Got datagram, len = {}", len);
+                    }
+                }
+                if readiness.is_writable() {
+                    udp_writeable = true;
+                }*/
             } else {
                 let connection = clients.get_mut(&event.token()).unwrap();
                 let readiness = event.readiness();
@@ -211,7 +240,6 @@ fn io_error(c: &mut Client, e: io::Error) {
 }
 
 fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H) -> io::Result<()> {
-    use byteorder::{BigEndian, ReadBytesExt};
     use mumble_protocol::*;
 
     loop {
@@ -228,7 +256,9 @@ fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H) 
                 if buffer.len() < len {
                     break;  // incomplete
                 }
-                if let Err(e) = handler.handle(Packet::parse(ty, &buffer[6..len])?) {
+                if ty == 1 {  // UdpTunnel
+                    read_voice(&buffer[6..len], handler)?;
+                } else if let Err(e) = handler.handle(Packet::parse(ty, &buffer[6..len])?) {
                     return handler.error(e);
                 }
                 consumed += len;
@@ -239,12 +269,85 @@ fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H) 
     }
 }
 
+fn read_voice<H: Handler>(mut buffer: &[u8], handler: &mut H) -> io::Result<()> {
+    //const CELT_ALPHA: u8 = 0;
+    const PING: u8 = 1;
+    //const SPEEX: u8 = 2;
+    //const CELT_BETA: u8 = 3;
+    const OPUS: u8 = 4;
+    const TARGET_NORMAL: u8 = 0;
+    //const TARGET_LOOPBACK: u8 = 31;
+
+    let header = buffer.read_u8()?;
+    let (ty, target) = (header >> 5, header & 0b11111);
+    if ty == PING {
+        let timestamp = read_varint(&mut buffer)?;
+        println!("Ping: {}", timestamp);
+        return Ok(())
+    } else if ty != OPUS {
+        println!("Unknown type: {}", ty);
+        return Ok(())
+    }
+    if target != TARGET_NORMAL {
+        println!("Unknown target: {}", target);
+    }
+
+    // incoming format
+    let sequence_number = read_varint(&mut buffer)?;
+    println!("Opus frame: seq={} len={}", sequence_number, buffer.len());
+
+    handler.handle_voice().or_else(|e| handler.error(e))
+}
+
+#[allow(unused_variables)]
 pub trait Handler {
     type Error;
-    fn handle(&mut self, packet: Packet) -> Result<(), Self::Error>;
-    fn error(&mut self, _error: Self::Error) -> io::Result<()> {
+    fn handle(&mut self, packet: Packet) -> Result<(), Self::Error> { Ok(()) }
+    fn handle_voice(&mut self) -> Result<(), Self::Error> { Ok(()) }
+    fn error(&mut self, error: Self::Error) -> io::Result<()> {
         Err(io::Error::new(io::ErrorKind::Other, "Internal server error"))
     }
+}
+
+// https://mumble-protocol.readthedocs.io/en/latest/voice_data.html#variable-length-integer-encoding
+#[inline]
+fn read_varint<R: Read>(r: &mut R) -> io::Result<i64> {
+    read_varint_inner(r, false)
+}
+
+fn read_varint_inner<R: Read>(r: &mut R, recursive: bool) -> io::Result<i64> {
+    let first_byte = r.read_u8()? as i64;
+    if first_byte & 128 == 0 {  // 7-bit positive number
+        Ok(first_byte & 127)
+    } else if first_byte & 64 == 0 {  // 14-bit positive number
+        let second_byte = r.read_u8()? as i64;
+        Ok(((first_byte & 63) << 8) | second_byte)
+    } else if first_byte & 32 == 0 {  // 21-bit positive number
+        let second_byte = r.read_u8()? as i64;
+        let third_byte = r.read_u8()? as i64;
+        Ok(((first_byte & 31) << 16) | (second_byte << 8) | third_byte)
+    } else if first_byte & 16 == 0 {  // 28-bit positive number
+        let second_byte = r.read_u8()? as i64;
+        let third_byte = r.read_u8()? as i64;
+        let fourth_byte = r.read_u8()? as i64;
+        Ok(((first_byte & 15) << 24) | (second_byte << 16) | (third_byte << 8) | fourth_byte)
+    } else if first_byte & 12 == 0 {  // 32-bit positive number
+        Ok(r.read_u32::<BigEndian>()? as i64)
+    } else if first_byte & 12 == 4 {  // 64-bit number
+        r.read_i64::<BigEndian>()
+    } else if first_byte & 12 == 8 {  // negative recursive varint
+        if recursive {  // can't negate a negation
+            Err(io::ErrorKind::InvalidData.into())
+        } else {
+            read_varint_inner(r, true).map(|i| -i)
+        }
+    } else /* first_byte & 12 == 4 */ {  // byte-inverted negative two-bit number
+        Ok(!(first_byte & 3))
+    }
+}
+
+fn write_varint<W: Write>(w: &mut W, val: i64) -> io::Result<()> {
+    unimplemented!()
 }
 
 // ----------------------------------------------------------------------------
