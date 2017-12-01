@@ -10,18 +10,18 @@ extern crate serde;
 extern crate serde_json;
 #[macro_use] extern crate serde_derive;
 
-pub mod ffi;
-pub mod net;
-
-use mumble_protocol::Packet;
-
 macro_rules! packet {
-    ($ty:path; $($name:ident: $value:expr,)*) => {{
-        let mut packet = <$ty>::new();
+    ($ty:ident; $($name:ident: $value:expr,)*) => {{
+        let mut packet = ::mumble_protocol::$ty::new();
         $(packet.$name($value);)*
         packet
     }}
 }
+
+pub mod ffi;
+pub mod net;
+
+use mumble_protocol::Packet;
 
 /// A handle to a running Hullrot server.
 pub struct Handle {
@@ -168,7 +168,7 @@ impl net::Handler for Client {
         Ok(())
     }
 
-    fn handle_voice(&mut self, seq: i64, voice: &[i16]) -> Result<(), Self::Error> {
+    fn handle_voice(&mut self, seq: i64, voice: &[net::Sample]) -> Result<(), Self::Error> {
         self.sender.send_voice(1, seq, voice.to_owned());
         Ok(())
     }

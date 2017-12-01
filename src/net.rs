@@ -149,7 +149,7 @@ pub fn server_thread() {
 
                             // Construct the UDPTunnel packet
                             let mut encoded = Vec::new();
-                            let _ = encoded.write_u16::<BigEndian>(2);  // UDP tunnel
+                            let _ = encoded.write_u16::<BigEndian>(1);  // UDP tunnel
                             let _ = encoded.write_u32::<BigEndian>(0);  // Placeholder for length
 
                             // Construct the voice datagram
@@ -157,7 +157,7 @@ pub fn server_thread() {
                             let _ = encoded.write_u8(128);  // header byte, opus on normal channel
                             let _ = write_varint(&mut encoded, who as i64);  // session of source user
                             let _ = write_varint(&mut encoded, seq);  // sequence number
-                            let _ = write_varint(&mut encoded, (len | 0x2000) as i64);  // opus header
+                            let _ = write_varint(&mut encoded, len as i64);  // opus header
                             let total_len = encoded.len() + len - start;
                             let _ = (&mut encoded[2..6]).write_u32::<BigEndian>(total_len as u32);
 
@@ -213,7 +213,8 @@ fn new_connection(session: u32, remote: ::std::net::SocketAddr, stream: Stream) 
 const SAMPLE_RATE: u32 = 48000;
 const CHANNELS: Channels = Channels::Mono;
 const APPLICATION: Application = Application::Voip;
-const BITRATE: Bitrate = Bitrate::Bits(72000);
+const BITRATE: Bitrate = Bitrate::Bits(40000);
+pub type Sample = i16;
 
 #[derive(Clone, Debug)]
 pub struct PacketChannel(mpsc::Sender<Command>);
@@ -223,7 +224,7 @@ enum Command {
     VoiceData {
         who: u32,
         seq: i64,
-        audio: Vec<i16>,
+        audio: Vec<Sample>,
     },
 }
 
@@ -234,7 +235,7 @@ impl PacketChannel {
     }
 
     #[inline]
-    pub fn send_voice(&self, who: u32, seq: i64, audio: Vec<i16>) -> bool {
+    pub fn send_voice(&self, who: u32, seq: i64, audio: Vec<Sample>) -> bool {
         self.0.send(Command::VoiceData { who, seq, audio }).is_ok()
     }
 }
@@ -364,7 +365,12 @@ fn read_voice<H: Handler>(mut buffer: &[u8], handler: &mut H, decoder: &mut Deco
     let mut output = [0i16; 960 * 2];
     let len = decoder.decode(opus_packet, &mut output, false).unwrap();
 
-    println!("IN: voice: seq={} len1={} len2={}", sequence_number, opus_length, len);
+    println!("IN: voice: seq={} rem={} enc={} dec={}",
+        sequence_number,
+        buffer.len() - opus_length as usize,
+        opus_length,
+        len,
+        );
 
     handler.handle_voice(sequence_number, &output[..len]).or_else(|e| handler.error(e))
 }
@@ -373,7 +379,7 @@ fn read_voice<H: Handler>(mut buffer: &[u8], handler: &mut H, decoder: &mut Deco
 pub trait Handler {
     type Error;
     fn handle(&mut self, packet: Packet) -> Result<(), Self::Error> { Ok(()) }
-    fn handle_voice(&mut self, seq: i64, samples: &[i16]) -> Result<(), Self::Error> { Ok(()) }
+    fn handle_voice(&mut self, seq: i64, samples: &[Sample]) -> Result<(), Self::Error> { Ok(()) }
     fn error(&mut self, error: Self::Error) -> io::Result<()> {
         Err(io::Error::new(io::ErrorKind::Other, "Internal server error"))
     }
@@ -449,6 +455,15 @@ fn write_varint<W: Write>(w: &mut W, mut val: i64) -> io::Result<()> {
     } else {
         w.write_u8(0b11110100)?;  // 64-bit number
         w.write_i64::<BigEndian>(val)
+    }
+}
+
+#[test]
+pub fn test_varint_agreement() {
+    let mut buf = [0u8; 16];
+    for i in -1000..1000 {
+        write_varint(&mut &mut buf[..], i).unwrap();
+        assert_eq!(read_varint(&mut &buf[..]).unwrap(), i);
     }
 }
 
