@@ -15,7 +15,7 @@ use openssl::x509;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use mumble_protocol::Packet;
-use opus::{Channels, Application, Decoder, Encoder};
+use opus::{Channels, Application, Bitrate, Decoder, Encoder};
 use Client;
 
 // ----------------------------------------------------------------------------
@@ -42,7 +42,7 @@ pub fn server_thread() {
 
     /*let udp = UdpSocket::bind(&addr).unwrap();
     poll.register(&udp, UDP_SOCKET, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
-    let mut udp_writeable = true;*/
+    let mut udp_writable = true;*/
     let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit
 
     let mut clients = HashMap::new();
@@ -71,18 +71,7 @@ pub fn server_thread() {
 
                     let ssl = Ssl::new(&ctx).unwrap();
                     let stream = Stream::new(ssl.accept(stream));
-
-                    let (tx, rx) = mpsc::channel();
-                    clients.insert(token, Connection {
-                        stream,
-                        read_buf: BufReader::new(),
-                        write_buf: BufWriter::new(),
-                        write_rx: rx,
-                        //write_tx: tx.clone(),
-                        client: Client::new(remote, PacketChannel(tx), session),
-                        encoder: Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION).unwrap(),
-                        decoder: Decoder::new(SAMPLE_RATE, CHANNELS).unwrap(),
-                    });
+                    clients.insert(token, new_connection(session, remote, stream));
                 }
             /*} else if event.token() == UDP_SOCKET {
                 let readiness = event.readiness();
@@ -165,10 +154,10 @@ pub fn server_thread() {
 
                             // Construct the voice datagram
                             let start = encoded.len();
-                            let _ = encoded.write_u8(128 | 31);  // header byte, opus on normal channel
+                            let _ = encoded.write_u8(128);  // header byte, opus on normal channel
                             let _ = write_varint(&mut encoded, who as i64);  // session of source user
                             let _ = write_varint(&mut encoded, seq);  // sequence number
-                            let _ = write_varint(&mut encoded, len as i64);  // opus header
+                            let _ = write_varint(&mut encoded, (len | 0x2000) as i64);  // opus header
                             let total_len = encoded.len() + len - start;
                             let _ = (&mut encoded[2..6]).write_u32::<BigEndian>(total_len as u32);
 
@@ -178,7 +167,8 @@ pub fn server_thread() {
                                 out.write_all(&udp_buf[..len])
                             })() {
                                 Ok(()) => {
-                                    println!("OUT: voice: who={} seq={} audio={}", who, seq, audio.len());
+                                    println!("OUT: voice: who={} seq={} audio={} tiny={} big={}", who, seq, audio.len(), len, total_len);
+                                    println!("{:?}", encoded);
                                 }
                                 Err(e) => { io_error(&mut connection.client, e); break }
                             }
@@ -199,12 +189,31 @@ pub fn server_thread() {
     }
 }
 
+fn new_connection(session: u32, remote: ::std::net::SocketAddr, stream: Stream) -> Connection {
+    let (tx, rx) = mpsc::channel();
+    let decoder = Decoder::new(SAMPLE_RATE, CHANNELS).unwrap();
+    let mut encoder = Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION).unwrap();
+    encoder.set_bitrate(BITRATE).unwrap();
+    encoder.set_vbr(false).unwrap();
+    Connection {
+        stream,
+        encoder,
+        decoder,
+        read_buf: BufReader::new(),
+        write_buf: BufWriter::new(),
+        write_rx: rx,
+        //write_tx: tx.clone(),
+        client: Client::new(remote, PacketChannel(tx), session),
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Support
 
 const SAMPLE_RATE: u32 = 48000;
 const CHANNELS: Channels = Channels::Mono;
 const APPLICATION: Application = Application::Voip;
+const BITRATE: Bitrate = Bitrate::Bits(72000);
 
 #[derive(Clone, Debug)]
 pub struct PacketChannel(mpsc::Sender<Command>);

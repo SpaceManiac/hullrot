@@ -138,7 +138,14 @@ impl net::Handler for Client {
                     set_permissions: Permissions::DEFAULT.bits(),
                 });
                 self.sender.send(packet! { UserState;
+                    set_session: 1,
+                    set_channel_id: 0,
+                    set_name: "System".to_owned(),
+                    set_hash: "0000000000000000000000000000000000000001".into(),
+                });
+                self.sender.send(packet! { UserState;
                     set_session: self.session,
+                    set_channel_id: 0,
                     set_name: name.to_owned(),
                     set_hash: "0000000000000000000000000000000000000000".into(),
                 });
@@ -162,7 +169,7 @@ impl net::Handler for Client {
     }
 
     fn handle_voice(&mut self, seq: i64, voice: &[i16]) -> Result<(), Self::Error> {
-        self.sender.send_voice(self.session, seq, voice.to_owned());
+        self.sender.send_voice(1, seq, voice.to_owned());
         Ok(())
     }
 
