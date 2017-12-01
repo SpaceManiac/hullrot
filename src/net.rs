@@ -28,7 +28,9 @@ pub fn server_thread() {
 
     // TODO: audit
     let mut ctx = SslContext::builder(SslMethod::tls()).expect("failed: create ssl context");
-    ctx.set_cipher_list("AES256-SHA").unwrap();
+    ctx.set_cipher_list("ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:\
+        ECDHE-ECDSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-SHA:\
+        DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA").unwrap();
     ctx.set_verify(SSL_VERIFY_NONE);
     ctx.set_certificate_file("cert.pem", x509::X509_FILETYPE_PEM).expect("failed: load server certificate");
     ctx.set_private_key_file("key.pem", x509::X509_FILETYPE_PEM).expect("failed: load server private key");
@@ -161,15 +163,14 @@ pub fn server_thread() {
                             let total_len = encoded.len() + len - start;
                             let _ = (&mut encoded[2..6]).write_u32::<BigEndian>(total_len as u32);
 
+                            //println!("OUT: voice: who={} seq={} audio={} tiny={} big={}", who, seq, audio.len(), len, total_len);
+
                             let mut out = connection.write_buf.with(stream);
                             match (|| {
                                 out.write_all(&encoded)?;
                                 out.write_all(&udp_buf[..len])
                             })() {
-                                Ok(()) => {
-                                    println!("OUT: voice: who={} seq={} audio={} tiny={} big={}", who, seq, audio.len(), len, total_len);
-                                    println!("{:?}", encoded);
-                                }
+                                Ok(()) => {}
                                 Err(e) => { io_error(&mut connection.client, e); break }
                             }
                         }
@@ -365,12 +366,12 @@ fn read_voice<H: Handler>(mut buffer: &[u8], handler: &mut H, decoder: &mut Deco
     let mut output = [0i16; 960 * 2];
     let len = decoder.decode(opus_packet, &mut output, false).unwrap();
 
-    println!("IN: voice: seq={} rem={} enc={} dec={}",
+    /*println!("IN: voice: seq={} rem={} enc={} dec={}",
         sequence_number,
         buffer.len() - opus_length as usize,
         opus_length,
         len,
-        );
+        );*/
 
     handler.handle_voice(sequence_number, &output[..len]).or_else(|e| handler.error(e))
 }

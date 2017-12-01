@@ -48,23 +48,30 @@ struct Client {
     remote: std::net::SocketAddr,
     disconnected: Option<String>,
     // state
+    admin: bool,
     session: u32,
     username: Option<String>,
 }
 
 impl Client {
     fn new(remote: std::net::SocketAddr, sender: net::PacketChannel, session: u32) -> Client {
-        use mumble_protocol::*;
+        sender.send(packet! { Version;
+            set_version: 0x10300,
+            set_release: concat!("Hullrot v", env!("CARGO_PKG_VERSION")).to_owned(),
+            set_os: std::env::consts::FAMILY.into(),
+            set_os_version: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        });
 
-        let mut version = Version::new();
-        version.set_version(66304);
-        version.set_release(concat!("Hullrot v", env!("CARGO_PKG_VERSION")).to_owned());
-        sender.send(version);
+        let admin = match remote {
+            std::net::SocketAddr::V4(v4) => v4.ip().is_loopback(),
+            std::net::SocketAddr::V6(v6) => v6.ip().is_loopback(),
+        };
 
         Client {
             remote,
             sender,
             session,
+            admin,
             disconnected: None,
             username: None,
         }
@@ -74,9 +81,9 @@ impl Client {
 impl std::fmt::Display for Client {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         if let Some(ref name) = self.username {
-            write!(fmt, "{} ({})", name, self.remote)
+            write!(fmt, "{} ({}/{})", name, self.session, self.remote)
         } else {
-            write!(fmt, "({})", self.remote)
+            write!(fmt, "({}/{})", self.session, self.remote)
         }
     }
 }
@@ -113,8 +120,13 @@ impl net::Handler for Client {
                 if !auth.get_opus() {
                     return Err("No Opus support".into());
                 }
-                println!("({}) logged in as {}", self.remote, name);
+                println!("{} logged in as {}", self, name);
                 self.username = Some(name.to_owned());
+
+                let mut permissions = Permissions::TRAVERSE | Permissions::SPEAK;
+                if self.admin {
+                    permissions |= Permissions::KICK | Permissions::REGISTER | Permissions::REGISTER_SELF | Permissions::ENTER;
+                }
 
                 self.sender.send(packet! { CryptSetup;
                     set_key: vec![0; 16],
@@ -135,13 +147,13 @@ impl net::Handler for Client {
                 });
                 self.sender.send(packet! { PermissionQuery;
                     set_channel_id: 0,
-                    set_permissions: Permissions::DEFAULT.bits(),
+                    set_permissions: permissions.bits(),
                 });
                 self.sender.send(packet! { UserState;
                     set_session: 1,
                     set_channel_id: 0,
                     set_name: "System".to_owned(),
-                    set_hash: "0000000000000000000000000000000000000001".into(),
+                    set_hash: "0000000000000000000000000000000000000000".into(),
                 });
                 self.sender.send(packet! { UserState;
                     set_session: self.session,
@@ -153,11 +165,11 @@ impl net::Handler for Client {
                     set_session: self.session,
                     set_max_bandwidth: 72000,
                     set_welcome_text: "Welcome to Hullrot.".into(),
-                    set_permissions: Permissions::DEFAULT.bits() as u64,
+                    set_permissions: permissions.bits() as u64,
                 });
                 self.sender.send(packet! { ServerConfig;
-                    set_allow_html: true,
-                    set_message_length: 5000,
+                    set_allow_html: false,
+                    set_message_length: 2000,
                     set_image_message_length: 131072,
                     set_max_users: 100,
                 });
