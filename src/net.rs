@@ -64,7 +64,7 @@ pub fn server_thread(init: Init) {
     let mut next_token: u32 = FIRST_TOKEN;
 
     loop {
-        poll.poll(&mut events, Some(::std::time::Duration::from_millis(10))).unwrap();
+        poll.poll(&mut events, Some(::std::time::Duration::from_millis(5))).unwrap();
 
         // Check readiness events
         for event in events.iter() {
@@ -130,7 +130,7 @@ pub fn server_thread(init: Init) {
                 let stream = match connection.stream {
                     Stream::Active(ref mut stream) => stream,
                     Stream::Invalid => {
-                        kick(&mut connection.client, "SSL setup failure".to_owned());
+                        connection.client.kick("SSL setup failure");
                         break
                     },
                     _ => break,
@@ -151,7 +151,7 @@ pub fn server_thread(init: Init) {
                             }
                             let encoded = match packet.encode() {
                                 Ok(v) => v,
-                                Err(e) => { kick(&mut connection.client, format!("Encode error: {}", e)); break }
+                                Err(e) => { connection.client.kick(format!("Encode error: {}", e)); break }
                             };
                             match connection.write_buf.with(stream).write_all(&encoded) {
                                 Ok(()) => {}
@@ -193,6 +193,8 @@ pub fn server_thread(init: Init) {
                 }
             }
 
+            connection.client.tick();
+
             if let Some(ref message) = connection.client.disconnected {
                 println!("{} quit: {}", connection.client, message);
                 false
@@ -233,7 +235,7 @@ pub type Sample = i16;
 #[derive(Clone, Debug)]
 pub struct PacketChannel(mpsc::Sender<Command>);
 
-enum Command {
+pub enum Command {
     Packet(Packet),
     VoiceData {
         who: u32,
@@ -299,22 +301,19 @@ struct Connection {
     encoder: Encoder,
 }
 
-fn kick(c: &mut Client, why: String) {
-    if c.disconnected.is_none() {
-        c.disconnected = Some(why);
+fn io_error(c: &mut Client, e: io::Error) {
+    use std::io::ErrorKind::*;
+    if [ConnectionAborted, ConnectionReset, UnexpectedEof].contains(&e.kind()) {
+        c.kick("Disconnected")
+    } else {
+        c.kick(e.to_string())
     }
 }
 
-fn io_error(c: &mut Client, e: io::Error) {
-    use std::io::ErrorKind::*;
-    kick(c, if [ConnectionAborted, ConnectionReset, UnexpectedEof].contains(&e.kind()) {
-        "Disconnected".to_owned()
-    } else {
-        e.to_string()
-    })
-}
+// ----------------------------------------------------------------------------
+// Protocol implementation
 
-fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H, decoder: &mut Decoder) -> io::Result<()> {
+fn read_packets<R: BufRead + ?Sized>(read: &mut R, client: &mut Client, decoder: &mut Decoder) -> io::Result<()> {
     use mumble_protocol::*;
 
     loop {
@@ -332,9 +331,18 @@ fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H, 
                     break;  // incomplete
                 }
                 if ty == 1 {  // UdpTunnel
-                    read_voice(&buffer[6..len], handler, decoder)?;
-                } else if let Err(e) = handler.handle(Packet::parse(ty, &buffer[6..len])?) {
-                    return handler.error(e);
+                    read_voice(&buffer[6..len], client, decoder)?;
+                } else {
+                    let packet = Packet::parse(ty, &buffer[6..len])?;
+                    // handle pings immediately, save Client the trouble
+                    if let Packet::Ping(ref ping) = packet {
+                        client.sender.send(packet! { Ping;
+                            set_timestamp: ping.get_timestamp(),
+                        });
+                    } else {
+                        println!("IN: {:?}", packet);
+                    }
+                    client.events.push_back(Command::Packet(packet));
                 }
                 consumed += len;
                 buffer = &buffer[len..];
@@ -344,7 +352,7 @@ fn read_packets<R: BufRead + ?Sized, H: Handler>(read: &mut R, handler: &mut H, 
     }
 }
 
-fn read_voice<H: Handler>(mut buffer: &[u8], handler: &mut H, decoder: &mut Decoder) -> io::Result<()> {
+fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder) -> io::Result<()> {
     //const CELT_ALPHA: u8 = 0;
     const PING: u8 = 1;
     //const SPEEX: u8 = 2;
@@ -386,17 +394,12 @@ fn read_voice<H: Handler>(mut buffer: &[u8], handler: &mut H, decoder: &mut Deco
         len,
         );*/
 
-    handler.handle_voice(sequence_number, &output[..len]).or_else(|e| handler.error(e))
-}
-
-#[allow(unused_variables)]
-pub trait Handler {
-    type Error;
-    fn handle(&mut self, packet: Packet) -> Result<(), Self::Error> { Ok(()) }
-    fn handle_voice(&mut self, seq: i64, samples: &[Sample]) -> Result<(), Self::Error> { Ok(()) }
-    fn error(&mut self, error: Self::Error) -> io::Result<()> {
-        Err(io::Error::new(io::ErrorKind::Other, "Internal server error"))
-    }
+    client.events.push_back(Command::VoiceData {
+        who: 0,
+        seq: sequence_number,
+        audio: output[..len].to_owned(),
+    });
+    Ok(())
 }
 
 // https://mumble-protocol.readthedocs.io/en/latest/voice_data.html#variable-length-integer-encoding
@@ -482,7 +485,7 @@ pub fn test_varint_agreement() {
 }
 
 // ----------------------------------------------------------------------------
-// I/O helpers
+// Buffered I/O helpers
 
 const DEFAULT_BUF_SIZE: usize = 8 * 1024;
 
