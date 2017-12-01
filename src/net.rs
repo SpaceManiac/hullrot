@@ -38,8 +38,8 @@ pub fn init_server() -> Result<Init, Box<::std::error::Error>> {
         ECDHE-ECDSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-SHA:\
         DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA")?;
     ctx.set_verify(SSL_VERIFY_NONE);
-    ctx.set_certificate_file("cert.pem", x509::X509_FILETYPE_PEM)?;
-    ctx.set_private_key_file("key.pem", x509::X509_FILETYPE_PEM)?;
+    ctx.set_certificate_file("data/hullrot/cert.pem", x509::X509_FILETYPE_PEM)?;
+    ctx.set_private_key_file("data/hullrot/key.pem", x509::X509_FILETYPE_PEM)?;
     ctx.check_private_key()?;
     let ctx = ctx.build();
 
