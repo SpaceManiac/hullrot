@@ -31,9 +31,12 @@ pub struct Handle {
 impl Handle {
     /// Attempt to initialize and spawn the server in its child thread.
     pub fn init() -> Result<Handle, String> {
-        Ok(Handle {
-            thread: std::thread::spawn(net::server_thread),
-        })
+        match net::init_server() {
+            Ok(init) => Ok(Handle {
+                thread: std::thread::spawn(|| net::server_thread(init)),
+            }),
+            Err(err) => Err(err.to_string()),
+        }
     }
 
     /// Block until the server stops or crashes.

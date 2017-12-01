@@ -21,34 +21,47 @@ use Client;
 // ----------------------------------------------------------------------------
 // Main server thread
 
-pub fn server_thread() {
-    const TCP_SERVER: Token = Token(0);
-    //const UDP_SOCKET: Token = Token(1);
-    let mut next_token: u32 = 2;
+const TCP_SERVER: Token = Token(0);
+//const UDP_SOCKET: Token = Token(1);
+const FIRST_TOKEN: u32 = 2;
 
+pub struct Init {
+    ctx: SslContext,
+    poll: Poll,
+    server: TcpListener,
+}
+
+pub fn init_server() -> Result<Init, Box<::std::error::Error>> {
     // TODO: audit
-    let mut ctx = SslContext::builder(SslMethod::tls()).expect("failed: create ssl context");
+    let mut ctx = SslContext::builder(SslMethod::tls())?;
     ctx.set_cipher_list("ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:\
         ECDHE-ECDSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-SHA:\
-        DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA").unwrap();
+        DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA")?;
     ctx.set_verify(SSL_VERIFY_NONE);
-    ctx.set_certificate_file("cert.pem", x509::X509_FILETYPE_PEM).expect("failed: load server certificate");
-    ctx.set_private_key_file("key.pem", x509::X509_FILETYPE_PEM).expect("failed: load server private key");
-    ctx.check_private_key().expect("failed: private key validation");
+    ctx.set_certificate_file("cert.pem", x509::X509_FILETYPE_PEM)?;
+    ctx.set_private_key_file("key.pem", x509::X509_FILETYPE_PEM)?;
+    ctx.check_private_key()?;
     let ctx = ctx.build();
 
-    let poll = Poll::new().unwrap();
-    let addr = "0.0.0.0:64738".parse().unwrap();
-    let server = TcpListener::bind(&addr).unwrap();
-    poll.register(&server, TCP_SERVER, Ready::readable(), PollOpt::edge()).unwrap();
+    let poll = Poll::new()?;
+    let addr = "0.0.0.0:64738".parse()?;
+    let server = TcpListener::bind(&addr)?;
+    poll.register(&server, TCP_SERVER, Ready::readable(), PollOpt::edge())?;
 
     /*let udp = UdpSocket::bind(&addr).unwrap();
     poll.register(&udp, UDP_SOCKET, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
     let mut udp_writable = true;*/
+
+    Ok(Init { ctx, poll, server })
+}
+
+pub fn server_thread(init: Init) {
+    let Init { ctx, poll, server } = init;
     let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit
 
     let mut clients = HashMap::new();
     let mut events = Events::with_capacity(1024);
+    let mut next_token: u32 = FIRST_TOKEN;
 
     loop {
         poll.poll(&mut events, Some(::std::time::Duration::from_millis(10))).unwrap();
