@@ -1,6 +1,5 @@
 //! Hullrot is a minimalist Mumble server designed for immersive integration
 //! with the roleplaying spaceman simulator Space Station 13.
-extern crate libc;
 extern crate mio;
 extern crate openssl;
 extern crate byteorder;
@@ -40,6 +39,23 @@ enum ControlIn {
 #[derive(Serialize, Debug, Clone)]
 enum ControlOut {
     Debug(String),
+    Version {
+        version: &'static str,
+        major: u32,
+        minor: u32,
+        patch: u32,
+    }
+}
+
+impl ControlOut {
+    fn welcome() -> ControlOut {
+        ControlOut::Version {
+            version: env!("CARGO_PKG_VERSION"),
+            major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
+            minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
+            patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------

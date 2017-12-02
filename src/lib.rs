@@ -38,7 +38,7 @@ fn json_response<T: Serialize + ?Sized>(t: &T) -> *const c_char {
     with_output_buffer(|buf| {
         if let Err(e) = serde_json::to_writer(&mut *buf, t) {
             buf.clear();
-            let _ = write!(buf, r#"{{"error":{:?}}} "#, e.to_string());
+            let _ = write!(buf, r#"{{"error":{:?}}}"#, e.to_string());
         }
     })
 }
@@ -52,9 +52,7 @@ fn error<T: AsRef<str>>(msg: T) -> *const c_char {
 }
 
 fn ok() -> *const c_char {
-    #[derive(Serialize)]
-    struct Empty {}
-    json_response(&Empty {})
+    b"{}\0".as_ptr() as *const c_char
 }
 
 fn with_handle<F: FnOnce(&mut Handle) -> *const c_char>(f: F) -> *const c_char {
@@ -208,8 +206,10 @@ fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mps
     let mut read_buf = util::BufReader::new();
     let mut write_buf = util::BufWriter::new();
 
-    loop {
-        poll.poll(&mut events, Some(::std::time::Duration::from_millis(5))).unwrap();
+    'main: loop {
+        if let Err(e) = poll.poll(&mut events, Some(::std::time::Duration::from_millis(5))) {
+            return control_fatal(&event_tx, &e.to_string());
+        }
 
         // Check readiness events
         for event in events.iter() {
@@ -252,10 +252,12 @@ fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mps
                 // If there's none to send, try again later
                 Err(mpsc::TryRecvError::Empty) => break,
                 // The channel has dropped, we need to end quick
-                Err(mpsc::TryRecvError::Disconnected) => return,
+                Err(mpsc::TryRecvError::Disconnected) => break 'main,
             }
         }
     }
+
+    let _ = stream.shutdown(std::net::Shutdown::Both);
 }
 
 fn control_fatal(event_tx: &mpsc::Sender<Vec<u8>>, text: &str) {
@@ -268,7 +270,7 @@ fn control_fatal(event_tx: &mpsc::Sender<Vec<u8>>, text: &str) {
     let mut buf = Vec::new();
     if let Err(e) = serde_json::to_writer(&mut buf, &Error { Fatal: text }) {
         buf.clear();
-        let _ = write!(buf, r#"{{"error":{:?}}} "#, e.to_string());
+        let _ = write!(buf, r#"{{"error":{:?}}}"#, e.to_string());
     }
     let _ = event_tx.send(buf);
 }

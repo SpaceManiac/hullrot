@@ -95,7 +95,7 @@ pub fn server_thread(init: Init) {
 
                     let ssl = Ssl::new(&ctx).unwrap();
                     let stream = Stream::new(ssl.accept(stream));
-                    clients.insert(token, new_connection(session, remote, stream));
+                    clients.insert(token, Connection::new(session, remote, stream));
                 }
             } else if event.token() == CONTROL_SERVER {
                 loop {
@@ -114,14 +114,7 @@ pub fn server_thread(init: Init) {
                     }
                     println!("CONTROL: {} connected", remote);
                     poll.register(&stream, CONTROL_CHANNEL, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
-                    control_client = Some(ControlConnection {
-                        stream,
-                        read_buf: BufReader::new(),
-                        write_buf: BufWriter::new(),
-                        read_queue: VecDeque::new(),
-                        write_queue: VecDeque::new(),
-                        dead: false,
-                    });
+                    control_client = Some(ControlConnection::new(stream));
                 }
             } else if event.token() == CONTROL_CHANNEL {
                 if let Some(ref mut control) = control_client {
@@ -314,24 +307,6 @@ pub fn server_thread(init: Init) {
     }
 }
 
-fn new_connection(session: u32, remote: SocketAddr, stream: Stream) -> Connection {
-    let (tx, rx) = mpsc::channel();
-    let decoder = Decoder::new(SAMPLE_RATE, CHANNELS).unwrap();
-    let mut encoder = Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION).unwrap();
-    encoder.set_bitrate(BITRATE).unwrap();
-    encoder.set_vbr(false).unwrap();
-    Connection {
-        stream,
-        encoder,
-        decoder,
-        read_buf: BufReader::new(),
-        write_buf: BufWriter::new(),
-        write_rx: rx,
-        //write_tx: tx.clone(),
-        client: Client::new(remote, PacketChannel(tx), session),
-    }
-}
-
 pub fn is_loopback(remote: &SocketAddr) -> bool {
     match *remote {
         SocketAddr::V4(v4) => v4.ip().is_loopback(),
@@ -419,10 +394,28 @@ struct Connection {
     read_buf: BufReader,
     write_buf: BufWriter,
     write_rx: mpsc::Receiver<Command>,
-    //write_tx: mpsc::SyncSender<Packet>,
     client: Client,
     decoder: Decoder,
     encoder: Encoder,
+}
+
+impl Connection {
+    fn new(session: u32, remote: SocketAddr, stream: Stream) -> Connection {
+        let (tx, rx) = mpsc::channel();
+        let decoder = Decoder::new(SAMPLE_RATE, CHANNELS).unwrap();
+        let mut encoder = Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION).unwrap();
+        encoder.set_bitrate(BITRATE).unwrap();
+        encoder.set_vbr(false).unwrap();
+        Connection {
+            stream,
+            encoder,
+            decoder,
+            read_buf: BufReader::new(),
+            write_buf: BufWriter::new(),
+            write_rx: rx,
+            client: Client::new(remote, PacketChannel(tx), session),
+        }
+    }
 }
 
 fn io_error(c: &mut Client, e: io::Error) {
@@ -634,6 +627,19 @@ struct ControlConnection {
 }
 
 impl ControlConnection {
+    fn new(stream: TcpStream) -> ControlConnection {
+        let mut write_queue = VecDeque::new();
+        write_queue.push_back(ControlOut::welcome());
+        ControlConnection {
+            stream,
+            read_buf: BufReader::new(),
+            write_buf: BufWriter::new(),
+            read_queue: VecDeque::new(),
+            write_queue,
+            dead: false,
+        }
+    }
+
     fn read(&mut self) -> io::Result<()> {
         let mut read = self.read_buf.with(&mut self.stream);
         loop {
