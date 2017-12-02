@@ -81,7 +81,7 @@ impl Server {
         self.control_connected = false;
     }
 
-    fn tick(&mut self, mut clients: net::Everyone) {
+    fn tick(&mut self, mut _clients: net::Everyone) {
         while let Some(_) = self.read_queue.pop_front() {
             // ...
         }
@@ -101,8 +101,8 @@ pub struct Client {
     session: u32,
     username: Option<String>,
     // language and radio information
-    mute: bool,  // mute (e.g. muzzled or biologically mute)
-    deaf: bool,  // deaf (e.g. flashbanged or biologically deaf)
+    mute: bool,  // mute (e.g. unconscious, muzzled, no tongue)
+    deaf: bool,  // deaf (e.g. unconscious, flashbanged, genetic damage)
     current_language: String,
     known_languages: HashSet<String>,
     local_with: HashSet<String>,  // list of nearby usernames we can hear
@@ -137,7 +137,7 @@ impl Client {
             current_language: "common".to_owned(),
             known_languages: Some("common".to_owned()).into_iter().collect(),
             local_with: HashSet::new(),
-            push_to_talk: Some(1459),
+            push_to_talk: None,
             speaking_radio: HashSet::new(),
             listening_radio: Some(1459).into_iter().collect(),
         }
@@ -149,7 +149,7 @@ impl Client {
         }
     }
 
-    fn quit(&mut self, server: &mut Server, mut others: net::Everyone) {
+    fn quit(&mut self, _server: &mut Server, mut others: net::Everyone) {
         others.for_each(|other| { other.sender.send(packet! { UserRemove;
             set_session: self.session,
         }); });
@@ -250,7 +250,16 @@ impl Client {
                 },
                 Command::Packet(_) => {},
                 Command::VoiceData { who: _, seq, audio } => {
-                    if self.mute { return }
+                    if !server.control_connected {
+                        // if there's no control connection, it's a free-for-all
+                        others.for_each(|other| {
+                            other.sender.send_voice(self.session, seq, audio.to_owned());
+                        });
+                        return
+                    } else if self.mute {
+                        return  // bodily mute
+                    }
+
                     let username = match self.username {
                         Some(ref username) => username,
                         None => continue,
