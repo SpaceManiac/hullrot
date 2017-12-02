@@ -47,19 +47,48 @@ enum ControlOut {
     }
 }
 
-impl ControlOut {
-    fn welcome() -> ControlOut {
-        ControlOut::Version {
+// ----------------------------------------------------------------------------
+// Mumble server
+
+pub struct Server {
+    // used by networking
+    read_queue: VecDeque<ControlIn>,
+    write_queue: VecDeque<ControlOut>,
+    // state
+    control_connected: bool,
+}
+
+impl Server {
+    fn new() -> Server {
+        Server {
+            read_queue: VecDeque::new(),
+            write_queue: VecDeque::new(),
+            control_connected: false,
+        }
+    }
+
+    fn connect(&mut self) {
+        self.control_connected = true;
+        self.write_queue.push_back(ControlOut::Version {
             version: env!("CARGO_PKG_VERSION"),
             major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
             minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
             patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
+        });
+    }
+
+    fn disconnect(&mut self) {
+        self.control_connected = false;
+    }
+
+    fn tick(&mut self, mut clients: net::Everyone) {
+        while let Some(_) = self.read_queue.pop_front() {
+            // ...
         }
+
+        // ...
     }
 }
-
-// ----------------------------------------------------------------------------
-// Mumble server
 
 pub struct Client {
     // used by networking
@@ -120,13 +149,13 @@ impl Client {
         }
     }
 
-    fn quit(&mut self, mut others: net::EveryoneElse) {
+    fn quit(&mut self, server: &mut Server, mut others: net::Everyone) {
         others.for_each(|other| { other.sender.send(packet! { UserRemove;
             set_session: self.session,
         }); });
     }
 
-    fn tick(&mut self, mut others: net::EveryoneElse) {
+    fn tick(&mut self, server: &mut Server, mut others: net::Everyone) {
         use mumble_protocol::{Packet, Permissions};
         use net::Command;
 

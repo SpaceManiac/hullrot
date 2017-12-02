@@ -16,7 +16,7 @@ use opus::{Channels, Application, Bitrate, Decoder, Encoder};
 
 use mumble_protocol::Packet;
 use hullrot::util::*;
-use {Client, ControlIn, ControlOut};
+use {Client, Server, ControlIn};
 
 // ----------------------------------------------------------------------------
 // Main server thread
@@ -70,6 +70,7 @@ pub fn server_thread(init: Init) {
     let mut events = Events::with_capacity(1024);
     let mut next_token: u32 = FIRST_TOKEN;
 
+    let mut control = Server::new();
     let mut control_client: Option<ControlConnection> = None;
 
     loop {
@@ -114,21 +115,22 @@ pub fn server_thread(init: Init) {
                     }
                     println!("CONTROL: {} connected", remote);
                     poll.register(&stream, CONTROL_CHANNEL, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
+                    control.connect();
                     control_client = Some(ControlConnection::new(stream));
                 }
             } else if event.token() == CONTROL_CHANNEL {
-                if let Some(ref mut control) = control_client {
+                if let Some(ref mut control_client) = control_client {
                     let readiness = event.readiness();
                     if readiness.is_writable() {
-                        control.write_buf.mark_writable();
+                        control_client.write_buf.mark_writable();
                     }
                     if readiness.is_readable() {
-                        match control.read() {
+                        match control_client.read(&mut control.read_queue) {
                             Ok(()) => {},
                             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
                             Err(e) => {
                                 println!("CONTROL: disconnected: {}", e);
-                                control.dead = true;
+                                control_client.dead = true;
                                 break
                             }
                         }
@@ -171,10 +173,10 @@ pub fn server_thread(init: Init) {
 
         // Update the control channel
         let mut dead = false;
-        if let Some(ref mut control) = control_client {
-            while control.write_buf.is_writable() {
-                if !control.write_buf.is_empty() {
-                    match control.write_buf.with(&mut control.stream).flush_buf() {
+        if let Some(ref mut control_client) = control_client {
+            while control_client.write_buf.is_writable() {
+                if !control_client.write_buf.is_empty() {
+                    match control_client.write_buf.with(&mut control_client.stream).flush_buf() {
                         Ok(()) => {}
                         Err(e) => { println!("CONTROL: flush error: {:?}", e); }
                     }
@@ -185,7 +187,7 @@ pub fn server_thread(init: Init) {
                         Err(e) => { println!("CONTROL: serialize error: {:?}", e); break; }
                     };
                     assert!(vec.len() <= 0xffffffff);
-                    let mut out = control.write_buf.with(&mut control.stream);
+                    let mut out = control_client.write_buf.with(&mut control_client.stream);
                     match (|| {
                         out.write_u32::<BigEndian>(vec.len() as u32)?;
                         out.write_all(&vec)
@@ -197,10 +199,11 @@ pub fn server_thread(init: Init) {
                     break
                 }
             }
-            dead = control.dead;
+            dead = control_client.dead;
         }
         // Drop the control channel if it needs to be
         if dead {
+            control.disconnect();
             control_client = None;
         }
 
@@ -208,12 +211,15 @@ pub fn server_thread(init: Init) {
             // This elaborate construction is used to let us tick() clients and
             // still give them a reference to the other clients.
             let mut clients_vec: Vec<&mut Connection> = clients.values_mut().collect();
+
+            control.tick(Everyone(&mut clients_vec[..], &mut []));
+
             for i in 0..clients_vec.len() {
                 let (before, after) = clients_vec.split_at_mut(i);
                 let (connection, after) = after.split_first_mut().unwrap();  // should be infallible
 
                 // Read events happened above, so tick immediately
-                connection.client.tick(EveryoneElse(before, after));
+                connection.client.tick(&mut control, Everyone(before, after));
             }
 
             // Now that clients have ticked, flush pending writes and finalize disconnectors
@@ -291,7 +297,7 @@ pub fn server_thread(init: Init) {
 
                 // should run in lockstep, but separate for lifetime reasons
                 if connection.client.disconnected.is_some() {
-                    connection.client.quit(EveryoneElse(before, after));
+                    connection.client.quit(&mut control, Everyone(before, after));
                 }
                 if let Some(ref message) = connection.client.disconnected {
                     println!("{} quit: {}", connection.client, message);
@@ -427,9 +433,9 @@ fn io_error(c: &mut Client, e: io::Error) {
     }
 }
 
-pub struct EveryoneElse<'a, 'b: 'a>(&'a mut [&'b mut Connection], &'a mut [&'b mut Connection]);
+pub struct Everyone<'a, 'b: 'a>(&'a mut [&'b mut Connection], &'a mut [&'b mut Connection]);
 
-impl<'a, 'b> EveryoneElse<'a, 'b> {
+impl<'a, 'b> Everyone<'a, 'b> {
     pub fn for_each<F: FnMut(&mut Client)>(&mut self, mut f: F) {
         for each in self.0.iter_mut() {
             f(&mut each.client);
@@ -621,26 +627,20 @@ struct ControlConnection {
     stream: TcpStream,
     read_buf: BufReader,
     write_buf: BufWriter,
-    write_queue: VecDeque<ControlOut>,
-    read_queue: VecDeque<ControlIn>,
     dead: bool,
 }
 
 impl ControlConnection {
     fn new(stream: TcpStream) -> ControlConnection {
-        let mut write_queue = VecDeque::new();
-        write_queue.push_back(ControlOut::welcome());
         ControlConnection {
             stream,
             read_buf: BufReader::new(),
             write_buf: BufWriter::new(),
-            read_queue: VecDeque::new(),
-            write_queue,
             dead: false,
         }
     }
 
-    fn read(&mut self) -> io::Result<()> {
+    fn read(&mut self, read_queue: &mut VecDeque<ControlIn>) -> io::Result<()> {
         let mut read = self.read_buf.with(&mut self.stream);
         loop {
             let mut consumed = 0;
@@ -657,7 +657,7 @@ impl ControlConnection {
                     }
                     if let Ok(msg) = ::serde_json::from_slice::<ControlIn>(&buffer[4..len]) {
                         println!("CONTROL IN: {:?}", msg);
-                        self.read_queue.push_back(msg);
+                        read_queue.push_back(msg);
                     }
                     consumed += len;
                     buffer = &buffer[len..];
