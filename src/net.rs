@@ -123,85 +123,103 @@ pub fn server_thread(init: Init) {
             }
         }
 
-        // Flush pending writes and drop disconnectors
-        clients.retain(|_, connection| {
-            while connection.write_buf.writable {
-                connection.stream.resolve();
-                let stream = match connection.stream {
-                    Stream::Active(ref mut stream) => stream,
-                    Stream::Invalid => {
-                        connection.client.kick("SSL setup failure");
+        {
+            // This elaborate construction is used to let us tick() clients and
+            // still give them a reference to the other clients.
+            let mut clients_vec: Vec<&mut Connection> = clients.values_mut().collect();
+            for i in 0..clients_vec.len() {
+                let (before, after) = clients_vec.split_at_mut(i);
+                let (connection, after) = after.split_first_mut().unwrap();  // should be infallible
+
+                // Read events happened above, so tick immediately
+                connection.client.tick(EveryoneElse(before, after));
+            }
+
+            // Now that clients have ticked, flush pending writes and finalize disconnectors
+            for i in 0..clients_vec.len() {
+                let (before, after) = clients_vec.split_at_mut(i);
+                let (connection, after) = after.split_first_mut().unwrap();  // should be infallible
+
+                while connection.write_buf.writable {
+                    connection.stream.resolve();
+                    let stream = match connection.stream {
+                        Stream::Active(ref mut stream) => stream,
+                        Stream::Invalid => {
+                            connection.client.kick("SSL setup failure");
+                            break
+                        },
+                        _ => break,
+                    };
+
+                    if !connection.write_buf.buf.is_empty() {
+                        match connection.write_buf.with(stream).flush_buf() {
+                            Ok(()) => {}
+                            Err(e) => io_error(&mut connection.client, e),
+                        }
+                        break;
+                    } else if let Ok(command) = connection.write_rx.try_recv() {
+                        match command {
+                            Command::Packet(packet) => {
+                                match packet {
+                                    Packet::Ping(_) => {}
+                                    _ => println!("OUT: {:?}", packet)
+                                }
+                                let encoded = match packet.encode() {
+                                    Ok(v) => v,
+                                    Err(e) => { connection.client.kick(format!("Encode error: {}", e)); break }
+                                };
+                                match connection.write_buf.with(stream).write_all(&encoded) {
+                                    Ok(()) => {}
+                                    Err(e) => { io_error(&mut connection.client, e); break }
+                                }
+                            }
+                            Command::VoiceData { who, seq, audio } => {
+                                // Encode the audio
+                                let len = connection.encoder.encode(&audio, &mut udp_buf).unwrap();
+
+                                // Construct the UDPTunnel packet
+                                let mut encoded = Vec::new();
+                                let _ = encoded.write_u16::<BigEndian>(1);  // UDP tunnel
+                                let _ = encoded.write_u32::<BigEndian>(0);  // Placeholder for length
+
+                                // Construct the voice datagram
+                                let start = encoded.len();
+                                let _ = encoded.write_u8(128);  // header byte, opus on normal channel
+                                let _ = write_varint(&mut encoded, who as i64);  // session of source user
+                                let _ = write_varint(&mut encoded, seq);  // sequence number
+                                let _ = write_varint(&mut encoded, len as i64);  // opus header
+                                let total_len = encoded.len() + len - start;
+                                let _ = (&mut encoded[2..6]).write_u32::<BigEndian>(total_len as u32);
+
+                                //println!("OUT: voice: who={} seq={} audio={} tiny={} big={}", who, seq, audio.len(), len, total_len);
+
+                                let mut out = connection.write_buf.with(stream);
+                                match (|| {
+                                    out.write_all(&encoded)?;
+                                    out.write_all(&udp_buf[..len])
+                                })() {
+                                    Ok(()) => {}
+                                    Err(e) => { io_error(&mut connection.client, e); break }
+                                }
+                            }
+                        }
+                    } else {
                         break
-                    },
-                    _ => break,
-                };
-
-                if !connection.write_buf.buf.is_empty() {
-                    match connection.write_buf.with(stream).flush_buf() {
-                        Ok(()) => {}
-                        Err(e) => io_error(&mut connection.client, e),
                     }
-                    break;
-                } else if let Ok(command) = connection.write_rx.try_recv() {
-                    match command {
-                        Command::Packet(packet) => {
-                            match packet {
-                                Packet::Ping(_) => {}
-                                _ => println!("OUT: {:?}", packet)
-                            }
-                            let encoded = match packet.encode() {
-                                Ok(v) => v,
-                                Err(e) => { connection.client.kick(format!("Encode error: {}", e)); break }
-                            };
-                            match connection.write_buf.with(stream).write_all(&encoded) {
-                                Ok(()) => {}
-                                Err(e) => { io_error(&mut connection.client, e); break }
-                            }
-                        }
-                        Command::VoiceData { who, seq, audio } => {
-                            // Encode the audio
-                            let len = connection.encoder.encode(&audio, &mut udp_buf).unwrap();
+                }
 
-                            // Construct the UDPTunnel packet
-                            let mut encoded = Vec::new();
-                            let _ = encoded.write_u16::<BigEndian>(1);  // UDP tunnel
-                            let _ = encoded.write_u32::<BigEndian>(0);  // Placeholder for length
-
-                            // Construct the voice datagram
-                            let start = encoded.len();
-                            let _ = encoded.write_u8(128);  // header byte, opus on normal channel
-                            let _ = write_varint(&mut encoded, who as i64);  // session of source user
-                            let _ = write_varint(&mut encoded, seq);  // sequence number
-                            let _ = write_varint(&mut encoded, len as i64);  // opus header
-                            let total_len = encoded.len() + len - start;
-                            let _ = (&mut encoded[2..6]).write_u32::<BigEndian>(total_len as u32);
-
-                            //println!("OUT: voice: who={} seq={} audio={} tiny={} big={}", who, seq, audio.len(), len, total_len);
-
-                            let mut out = connection.write_buf.with(stream);
-                            match (|| {
-                                out.write_all(&encoded)?;
-                                out.write_all(&udp_buf[..len])
-                            })() {
-                                Ok(()) => {}
-                                Err(e) => { io_error(&mut connection.client, e); break }
-                            }
-                        }
-                    }
-                } else {
-                    break
+                // should run in lockstep, but separate for lifetime reasons
+                if connection.client.disconnected.is_some() {
+                    connection.client.quit(EveryoneElse(before, after));
+                }
+                if let Some(ref message) = connection.client.disconnected {
+                    println!("{} quit: {}", connection.client, message);
                 }
             }
+        }
 
-            connection.client.tick();
-
-            if let Some(ref message) = connection.client.disconnected {
-                println!("{} quit: {}", connection.client, message);
-                false
-            } else {
-                true
-            }
-        })
+        // Drop disconnectors from the map
+        clients.retain(|_, connection| connection.client.disconnected.is_none());
     }
 }
 
@@ -307,6 +325,19 @@ fn io_error(c: &mut Client, e: io::Error) {
         c.kick("Disconnected")
     } else {
         c.kick(e.to_string())
+    }
+}
+
+pub struct EveryoneElse<'a, 'b: 'a>(&'a mut [&'b mut Connection], &'a mut [&'b mut Connection]);
+
+impl<'a, 'b> EveryoneElse<'a, 'b> {
+    pub fn for_each<F: FnMut(&mut Client)>(&mut self, mut f: F) {
+        for each in self.0.iter_mut() {
+            f(&mut each.client);
+        }
+        for each in self.1.iter_mut() {
+            f(&mut each.client);
+        }
     }
 }
 

@@ -19,7 +19,7 @@ macro_rules! packet {
 }
 
 pub mod ffi;
-pub mod net;
+mod net;
 
 use std::collections::VecDeque;
 use std::borrow::Cow;
@@ -46,7 +46,7 @@ impl Handle {
     }
 }
 
-struct Client {
+pub struct Client {
     // used by networking
     sender: net::PacketChannel,
     remote: std::net::SocketAddr,
@@ -89,7 +89,13 @@ impl Client {
         }
     }
 
-    fn tick(&mut self) {
+    fn quit(&mut self, mut others: net::EveryoneElse) {
+        others.for_each(|other| { other.sender.send(packet! { UserRemove;
+            set_session: self.session,
+        }); });
+    }
+
+    fn tick(&mut self, mut others: net::EveryoneElse) {
         use mumble_protocol::{Packet, Permissions};
         use net::Command;
 
@@ -148,6 +154,22 @@ impl Client {
                         set_name: name.to_owned(),
                         set_hash: "0000000000000000000000000000000000000000".into(),
                     });
+                    others.for_each(|other| {
+                        if let Some(ref username) = other.username {
+                            other.sender.send(packet! { UserState;
+                                set_session: self.session,
+                                set_channel_id: 0,
+                                set_name: name.to_owned(),
+                                set_hash: "0000000000000000000000000000000000000000".into(),
+                            });
+                            self.sender.send(packet! { UserState;
+                                set_session: other.session,
+                                set_channel_id: 0,
+                                set_name: username.to_owned(),
+                                set_hash: "0000000000000000000000000000000000000000".into(),
+                            });
+                        }
+                    });
                     self.sender.send(packet! { ServerSync;
                         set_session: self.session,
                         set_max_bandwidth: 72000,
@@ -163,7 +185,9 @@ impl Client {
                 },
                 Command::Packet(_) => {},
                 Command::VoiceData { who: _, seq, audio } => {
-                    self.sender.send_voice(1, seq, audio.to_owned());
+                    others.for_each(|other| {
+                        other.sender.send_voice(self.session, seq, audio.to_owned());
+                    })
                 }
             }
         }
