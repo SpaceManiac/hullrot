@@ -10,8 +10,12 @@ pub mod util;
 
 use std::cell::RefCell;
 use std::sync::mpsc;
+use std::io::{self, Write, BufRead};
 use libc::{c_int, c_char};
 
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use mio::*;
+use mio::net::*;
 use serde::Serialize;
 
 // ----------------------------------------------------------------------------
@@ -141,22 +145,122 @@ function! { hullrot_stop() {
 // ----------------------------------------------------------------------------
 // Control protocol client
 
+const CLIENT: Token = Token(0);
+
 /// A handle to a running Hullrot server.
 struct Handle {
     thread: std::thread::JoinHandle<()>,
     tx: mpsc::Sender<Vec<u8>>,
+    rx: mpsc::Receiver<Vec<u8>>,
 }
 
 impl Handle {
     /// Attempt to initialize and spawn the server in its child thread.
     fn init() -> Result<Handle, String> {
-        //let (tx, rx) = mpsc::channel();
-        Err("Not implemented".into())
+        let init = init_control().map_err(|e| e.to_string())?;
+        let (control_tx, control_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+        let thread = std::thread::spawn(|| control_thread(init, control_rx, event_tx));
+        Ok(Handle { thread, tx: control_tx, rx: event_rx })
     }
 
-    /// Block until the server stops or crashes.
+    /// Stop the network thread and block until it finishes or crashes.
     fn stop(self) {
         drop(self.tx);
+        drop(self.rx);
         let _ = self.thread.join();
+    }
+}
+
+struct Init {
+    poll: Poll,
+    stream: TcpStream,
+}
+
+fn init_control() -> Result<Init, Box<::std::error::Error>> {
+    let poll = Poll::new()?;
+    let addr = "127.0.0.1:10961".parse()?;
+    let stream = TcpStream::connect(&addr)?;
+    poll.register(&stream, CLIENT, Ready::readable() | Ready::writable(), PollOpt::edge())?;
+    Ok(Init { poll, stream })
+}
+
+fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mpsc::Sender<Vec<u8>>) {
+    let Init { poll, mut stream } = init;
+    let mut events = Events::with_capacity(1024);
+
+    let mut read_buf = util::BufReader::new();
+    let mut write_buf = util::BufWriter::new();
+
+    loop {
+        poll.poll(&mut events, Some(::std::time::Duration::from_millis(5))).unwrap();
+
+        // Check readiness events
+        for event in events.iter() {
+            let readiness = event.readiness();
+            if readiness.is_writable() {
+                write_buf.mark_writable();
+            }
+            if readiness.is_readable() {
+                match read_packets(&mut read_buf.with(&mut stream), &event_tx) {
+                    Ok(()) => {},
+                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
+                    Err(e) => panic!("{}", e),
+                }
+            }
+        }
+
+        // Write as needed
+        while write_buf.is_writable() {
+            if !write_buf.is_empty() {
+                match write_buf.with(&mut stream).flush_buf() {
+                    Ok(()) => {}
+                    Err(e) => { println!("CONTROL: flush error: {:?}", e); return; }
+                }
+                break;
+            }
+
+            match control_rx.try_recv() {
+                // Write control messages as long as we can
+                Ok(vec) => {
+                    assert!(vec.len() <= 0xffffffff);
+                    let mut out = write_buf.with(&mut stream);
+                    match (|| {
+                        out.write_u32::<BigEndian>(vec.len() as u32)?;
+                        out.write_all(&vec)
+                    })() {
+                        Ok(()) => {}
+                        Err(e) => { println!("CONTROL: write error: {:?}", e); return; }
+                    }
+                }
+                // If there's none to send, try again later
+                Err(mpsc::TryRecvError::Empty) => break,
+                // The channel has dropped, we need to end quick
+                Err(mpsc::TryRecvError::Disconnected) => return,
+            }
+        }
+    }
+}
+
+fn read_packets<R: BufRead + ?Sized>(read: &mut R, event_tx: &mpsc::Sender<Vec<u8>>) -> io::Result<()> {
+    loop {
+        let mut consumed = 0;
+        {
+            let mut buffer = read.fill_buf()?;
+            if buffer.is_empty() {
+                return Err(io::ErrorKind::UnexpectedEof.into());
+            }
+            // 4 bytes length followed by json
+            while buffer.len() >= 4 {
+                let len = 4 + (&buffer[..]).read_u32::<BigEndian>().unwrap() as usize;
+                if buffer.len() < len {
+                    break;  // incomplete
+                }
+                let _ = event_tx.send(buffer[4..len].to_owned());
+                consumed += len;
+                buffer = &buffer[len..];
+            }
+        }
+        read.consume(consumed);
     }
 }
