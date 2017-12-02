@@ -7,18 +7,16 @@ use std::sync::mpsc;
 use std::collections::{HashMap, VecDeque};
 use std::mem;
 
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use mio::*;
 use mio::net::*;
-
 use openssl::ssl::*;
 use openssl::x509;
-
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use opus::{Channels, Application, Bitrate, Decoder, Encoder};
 
 use mumble_protocol::Packet;
-use opus::{Channels, Application, Bitrate, Decoder, Encoder};
 use hullrot::util::*;
-use Client;
+use {Client, ControlIn, ControlOut};
 
 // ----------------------------------------------------------------------------
 // Main server thread
@@ -662,14 +660,4 @@ impl ControlConnection {
             read.consume(consumed);
         }
     }
-}
-
-#[derive(Deserialize, Debug, Clone)]
-enum ControlIn {
-    Debug(String),
-}
-
-#[derive(Serialize, Debug, Clone)]
-enum ControlOut {
-    Debug(String),
 }

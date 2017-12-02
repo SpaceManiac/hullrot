@@ -29,6 +29,22 @@ pub fn main() {
     net::server_thread(net::init_server().unwrap());
 }
 
+// ----------------------------------------------------------------------------
+// Control procotol
+
+#[derive(Deserialize, Debug, Clone)]
+enum ControlIn {
+    Debug(String),
+}
+
+#[derive(Serialize, Debug, Clone)]
+enum ControlOut {
+    Debug(String),
+}
+
+// ----------------------------------------------------------------------------
+// Mumble server
+
 pub struct Client {
     // used by networking
     sender: net::PacketChannel,

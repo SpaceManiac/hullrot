@@ -36,8 +36,7 @@ fn with_output_buffer<F: FnOnce(&mut Vec<u8>)>(f: F) -> *const c_char {
 
 fn json_response<T: Serialize + ?Sized>(t: &T) -> *const c_char {
     with_output_buffer(|buf| {
-        if let Err(e) = ::serde_json::to_writer(&mut *buf, t) {
-            use std::io::Write;
+        if let Err(e) = serde_json::to_writer(&mut *buf, t) {
             buf.clear();
             let _ = write!(buf, r#"{{"error":{:?}}} "#, e.to_string());
         }
@@ -113,8 +112,13 @@ function! { hullrot_init() {
         }
         match Handle::init() {
             Ok(handle) => {
+                // return the first event, should either be a Fatal or a Version
+                let msg = match handle.rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                    Ok(msg) => msg,
+                    Err(_) => return error("server did not respond in time"),
+                };
                 *opt = Some(handle);
-                ok()
+                with_output_buffer(|buf| buf.extend_from_slice(&msg))
             },
             Err(why) => error(why),
         }
@@ -128,7 +132,19 @@ function! { hullrot_control(args) {
                 return error("network thread panicked");
             }
         }
-        ok()
+
+        with_output_buffer(|buf| {
+            buf.push(b'[');
+            let mut first = true;
+            while let Ok(value) = handle.rx.try_recv() {
+                if !first {
+                    buf.push(b',');
+                }
+                buf.extend_from_slice(&value);
+                first = false;
+            }
+            buf.push(b']');
+        })
     })
 }}
 
@@ -205,7 +221,7 @@ fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mps
                 match read_packets(&mut read_buf.with(&mut stream), &event_tx) {
                     Ok(()) => {},
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
-                    Err(e) => panic!("{}", e),
+                    Err(e) => return control_fatal(&event_tx, &e.to_string()),
                 }
             }
         }
@@ -215,7 +231,7 @@ fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mps
             if !write_buf.is_empty() {
                 match write_buf.with(&mut stream).flush_buf() {
                     Ok(()) => {}
-                    Err(e) => { println!("CONTROL: flush error: {:?}", e); return; }
+                    Err(e) => return control_fatal(&event_tx, &e.to_string()),
                 }
                 break;
             }
@@ -230,7 +246,7 @@ fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mps
                         out.write_all(&vec)
                     })() {
                         Ok(()) => {}
-                        Err(e) => { println!("CONTROL: write error: {:?}", e); return; }
+                        Err(e) => return control_fatal(&event_tx, &e.to_string()),
                     }
                 }
                 // If there's none to send, try again later
@@ -240,6 +256,21 @@ fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mps
             }
         }
     }
+}
+
+fn control_fatal(event_tx: &mpsc::Sender<Vec<u8>>, text: &str) {
+    #[derive(Serialize)]
+    #[allow(non_snake_case)]
+    struct Error<'a> {
+        Fatal: &'a str,
+    }
+
+    let mut buf = Vec::new();
+    if let Err(e) = serde_json::to_writer(&mut buf, &Error { Fatal: text }) {
+        buf.clear();
+        let _ = write!(buf, r#"{{"error":{:?}}} "#, e.to_string());
+    }
+    let _ = event_tx.send(buf);
 }
 
 fn read_packets<R: BufRead + ?Sized>(read: &mut R, event_tx: &mpsc::Sender<Vec<u8>>) -> io::Result<()> {
