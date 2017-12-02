@@ -10,6 +10,8 @@ extern crate serde;
 extern crate serde_json;
 #[macro_use] extern crate serde_derive;
 
+extern crate hullrot;
+
 macro_rules! packet {
     ($ty:ident; $($name:ident: $value:expr,)*) => {{
         let mut packet = ::mumble_protocol::$ty::new();

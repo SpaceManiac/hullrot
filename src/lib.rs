@@ -6,9 +6,10 @@ extern crate serde;
 extern crate serde_json;
 #[macro_use] extern crate serde_derive;
 
+pub mod util;
+
 use std::cell::RefCell;
 use std::sync::mpsc;
-use std::{thread, time};
 use libc::{c_int, c_char};
 
 use serde::Serialize;
@@ -119,7 +120,9 @@ function! { hullrot_init() {
 function! { hullrot_control(args) {
     with_handle(|handle| {
         for arg in args {
-            handle.tx.send(arg.to_vec());
+            if handle.tx.send(arg.to_vec()).is_err() {
+                return error("network thread panicked");
+            }
         }
         ok()
     })
