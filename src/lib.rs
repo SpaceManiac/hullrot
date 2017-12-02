@@ -21,7 +21,7 @@ macro_rules! packet {
 pub mod ffi;
 mod net;
 
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashSet};
 use std::borrow::Cow;
 
 /// A handle to a running Hullrot server.
@@ -56,6 +56,15 @@ pub struct Client {
     admin: bool,
     session: u32,
     username: Option<String>,
+    // language and radio information
+    mute: bool,  // mute (e.g. muzzled or biologically mute)
+    deaf: bool,  // deaf (e.g. flashbanged or biologically deaf)
+    current_language: String,
+    known_languages: HashSet<String>,
+    local_with: HashSet<String>,  // list of nearby usernames we can hear
+    push_to_talk: Option<u16>,  // current PTT channel, or None for local
+    speaking_radio: HashSet<u16>,  // hot radio channels
+    listening_radio: HashSet<u16>,  // heard radio channels, e.g. 1459 for common
 }
 
 impl Client {
@@ -77,9 +86,19 @@ impl Client {
             session,
             admin,
             sender,
+
             disconnected: None,
             username: None,
             events: VecDeque::new(),
+
+            deaf: false,
+            mute: false,
+            current_language: "common".to_owned(),
+            known_languages: Some("common".to_owned()).into_iter().collect(),
+            local_with: HashSet::new(),
+            push_to_talk: Some(1459),
+            speaking_radio: HashSet::new(),
+            listening_radio: Some(1459).into_iter().collect(),
         }
     }
 
@@ -159,13 +178,13 @@ impl Client {
                             other.sender.send(packet! { UserState;
                                 set_session: self.session,
                                 set_channel_id: 0,
-                                set_name: name.to_owned(),
+                                set_name: if other.admin { name.to_owned() } else { "???".to_owned() },
                                 set_hash: "0000000000000000000000000000000000000000".into(),
                             });
                             self.sender.send(packet! { UserState;
                                 set_session: other.session,
                                 set_channel_id: 0,
-                                set_name: username.to_owned(),
+                                set_name: if self.admin { username.to_owned() } else { "???".to_owned() },
                                 set_hash: "0000000000000000000000000000000000000000".into(),
                             });
                         }
@@ -185,8 +204,24 @@ impl Client {
                 },
                 Command::Packet(_) => {},
                 Command::VoiceData { who: _, seq, audio } => {
+                    if self.mute { return }
+                    let username = match self.username {
+                        Some(ref username) => username,
+                        None => continue,
+                    };
+
                     others.for_each(|other| {
-                        other.sender.send_voice(self.session, seq, audio.to_owned());
+                        if other.deaf { return }
+                        let lang = &self.current_language;
+                        let lang_known = other.known_languages.contains(lang);
+                        let local_heard = other.local_with.contains(username);
+                        let ptt_heard = self.push_to_talk.map_or(false, |freq| other.listening_radio.contains(&freq));
+                        let hot_heard = self.speaking_radio.intersection(&other.listening_radio).next().is_some();
+
+                        //println!("{} -> {} -- {}={} {}/{}/{}", self, other, lang, lang_known, local_heard, ptt_heard, hot_heard);
+                        if lang_known && (local_heard || ptt_heard || hot_heard) {
+                            other.sender.send_voice(self.session, seq, audio.to_owned());
+                        }
                     })
                 }
             }
