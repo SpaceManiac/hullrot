@@ -76,10 +76,7 @@ impl Client {
             set_os_version: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         });
 
-        let admin = match remote {
-            std::net::SocketAddr::V4(v4) => v4.ip().is_loopback(),
-            std::net::SocketAddr::V6(v6) => v6.ip().is_loopback(),
-        };
+        let admin = net::is_loopback(&remote);
 
         Client {
             remote,
@@ -161,12 +158,12 @@ impl Client {
                         set_channel_id: 0,
                         set_permissions: permissions.bits(),
                     });
-                    self.sender.send(packet! { UserState;
+                    /*self.sender.send(packet! { UserState;
                         set_session: 1,
                         set_channel_id: 0,
                         set_name: "System".to_owned(),
                         set_hash: "0000000000000000000000000000000000000000".into(),
-                    });
+                    });*/
                     self.sender.send(packet! { UserState;
                         set_session: self.session,
                         set_channel_id: 0,
@@ -192,7 +189,6 @@ impl Client {
                     self.sender.send(packet! { ServerSync;
                         set_session: self.session,
                         set_max_bandwidth: 72000,
-                        set_welcome_text: "Welcome to Hullrot.".into(),
                         set_permissions: permissions.bits() as u64,
                     });
                     self.sender.send(packet! { ServerConfig;
@@ -200,6 +196,12 @@ impl Client {
                         set_message_length: 2000,
                         set_image_message_length: 131072,
                         set_max_users: 100,
+                    });
+                },
+                Command::Packet(Packet::UserRemove(ref remove)) if self.admin => {
+                    let session = remove.get_session();
+                    others.for_each(|other| if other.session == session {
+                        other.kick(format!("Kicked by {}: {}", self, remove.get_reason()));
                     });
                 },
                 Command::Packet(_) => {},

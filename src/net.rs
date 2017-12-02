@@ -2,8 +2,9 @@
 // https://mumble-protocol.readthedocs.io/en/latest/overview.html
 
 use std::io::{self, Read, Write, BufRead};
+use std::net::SocketAddr;
 use std::sync::mpsc;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::mem;
 
 use mio::*;
@@ -22,13 +23,16 @@ use Client;
 // Main server thread
 
 const TCP_SERVER: Token = Token(0);
-//const UDP_SOCKET: Token = Token(1);
-const FIRST_TOKEN: u32 = 2;
+const CONTROL_SERVER: Token = Token(1);
+const CONTROL_CHANNEL: Token = Token(2);
+//const UDP_SOCKET: Token = Token(3);
+const FIRST_TOKEN: u32 = 3;
 
 pub struct Init {
     ctx: SslContext,
     poll: Poll,
     server: TcpListener,
+    control_server: TcpListener,
 }
 
 pub fn init_server() -> Result<Init, Box<::std::error::Error>> {
@@ -52,16 +56,22 @@ pub fn init_server() -> Result<Init, Box<::std::error::Error>> {
     poll.register(&udp, UDP_SOCKET, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
     let mut udp_writable = true;*/
 
-    Ok(Init { ctx, poll, server })
+    let addr = "127.0.0.1:10961".parse()?;  // accept local control connections only
+    let control_server = TcpListener::bind(&addr)?;
+    poll.register(&control_server, CONTROL_SERVER, Ready::readable(), PollOpt::edge())?;
+
+    Ok(Init { ctx, poll, server, control_server })
 }
 
 pub fn server_thread(init: Init) {
-    let Init { ctx, poll, server } = init;
+    let Init { ctx, poll, server, control_server } = init;
     let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit
 
     let mut clients = HashMap::new();
     let mut events = Events::with_capacity(1024);
     let mut next_token: u32 = FIRST_TOKEN;
+
+    let mut control_client: Option<ControlConnection> = None;
 
     loop {
         poll.poll(&mut events, Some(::std::time::Duration::from_millis(5))).unwrap();
@@ -87,6 +97,50 @@ pub fn server_thread(init: Init) {
                     let ssl = Ssl::new(&ctx).unwrap();
                     let stream = Stream::new(ssl.accept(stream));
                     clients.insert(token, new_connection(session, remote, stream));
+                }
+            } else if event.token() == CONTROL_SERVER {
+                loop {
+                    let (stream, remote) = match control_server.accept() {
+                        Ok(r) => r,
+                        Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                        Err(e) => { println!("{:?}", e); continue },
+                    };
+                    if !is_loopback(&remote) {
+                        println!("CONTROL: {} rejected", remote);
+                    }
+                    if let Some(old) = control_client.take() {
+                        println!("CONTROL: dropping previous");
+                        poll.deregister(&old.stream).unwrap();
+                    }
+                    println!("CONTROL: {} connected", remote);
+                    poll.register(&stream, CONTROL_CHANNEL, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
+                    control_client = Some(ControlConnection {
+                        stream,
+                        read_buf: BufReader::new(),
+                        write_buf: BufWriter::new(),
+                        read_queue: VecDeque::new(),
+                        write_queue: VecDeque::new(),
+                        dead: false,
+                    });
+                }
+            } else if event.token() == CONTROL_CHANNEL {
+                if let Some(ref mut control) = control_client {
+                    let readiness = event.readiness();
+                    if readiness.is_writable() {
+                        control.write_buf.writable = true;
+                    }
+                    if readiness.is_readable() {
+                        match control.read() {
+                            Ok(()) => {},
+                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
+                            Err(e) => {
+                                println!("CONTROL: disconnected: {}", e);
+                                control.dead = true;
+                                break
+                            }
+                        }
+                    }
                 }
             /*} else if event.token() == UDP_SOCKET {
                 let readiness = event.readiness();
@@ -121,6 +175,41 @@ pub fn server_thread(init: Init) {
                     }
                 }
             }
+        }
+
+        // Update the control channel
+        let mut dead = false;
+        if let Some(ref mut control) = control_client {
+            while control.write_buf.writable {
+                if !control.write_buf.buf.is_empty() {
+                    match control.write_buf.with(&mut control.stream).flush_buf() {
+                        Ok(()) => {}
+                        Err(e) => { println!("CONTROL: flush error: {:?}", e); }
+                    }
+                    break;
+                } else if let Some(event) = control.write_queue.pop_front() {
+                    let vec = match ::serde_json::to_vec(&event) {
+                        Ok(vec) => vec,
+                        Err(e) => { println!("CONTROL: serialize error: {:?}", e); break; }
+                    };
+                    assert!(vec.len() <= 0xffffffff);
+                    let mut out = control.write_buf.with(&mut control.stream);
+                    match (|| {
+                        out.write_u32::<BigEndian>(vec.len() as u32)?;
+                        out.write_all(&vec)
+                    })() {
+                        Ok(()) => {}
+                        Err(e) => { println!("CONTROL: write error: {:?}", e); break; }
+                    }
+                } else {
+                    break
+                }
+            }
+            dead = control.dead;
+        }
+        // Drop the control channel if it needs to be
+        if dead {
+            control_client = None;
         }
 
         {
@@ -214,6 +303,9 @@ pub fn server_thread(init: Init) {
                 }
                 if let Some(ref message) = connection.client.disconnected {
                     println!("{} quit: {}", connection.client, message);
+                    if let Some(tcp) = connection.stream.inner() {
+                        poll.deregister(tcp).unwrap();
+                    }
                 }
             }
         }
@@ -223,7 +315,7 @@ pub fn server_thread(init: Init) {
     }
 }
 
-fn new_connection(session: u32, remote: ::std::net::SocketAddr, stream: Stream) -> Connection {
+fn new_connection(session: u32, remote: SocketAddr, stream: Stream) -> Connection {
     let (tx, rx) = mpsc::channel();
     let decoder = Decoder::new(SAMPLE_RATE, CHANNELS).unwrap();
     let mut encoder = Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION).unwrap();
@@ -238,6 +330,13 @@ fn new_connection(session: u32, remote: ::std::net::SocketAddr, stream: Stream) 
         write_rx: rx,
         //write_tx: tx.clone(),
         client: Client::new(remote, PacketChannel(tx), session),
+    }
+}
+
+pub fn is_loopback(remote: &SocketAddr) -> bool {
+    match *remote {
+        SocketAddr::V4(v4) => v4.ip().is_loopback(),
+        SocketAddr::V6(v6) => v6.ip().is_loopback(),
     }
 }
 
@@ -304,6 +403,14 @@ impl Stream {
         match *self {
             Stream::Active(ref mut stream) => Some(stream),
             _ => None,
+        }
+    }
+
+    fn inner(&mut self) -> Option<&mut TcpStream> {
+        match *self {
+            Stream::Invalid => None,
+            Stream::Handshaking(ref mut mid) => Some(mid.get_mut()),
+            Stream::Active(ref mut ssl) => Some(ssl.get_mut()),
         }
     }
 }
@@ -513,6 +620,57 @@ pub fn test_varint_agreement() {
         write_varint(&mut &mut buf[..], i).unwrap();
         assert_eq!(read_varint(&mut &buf[..]).unwrap(), i);
     }
+}
+
+// ----------------------------------------------------------------------------
+// Control protocol
+
+struct ControlConnection {
+    stream: TcpStream,
+    read_buf: BufReader,
+    write_buf: BufWriter,
+    write_queue: VecDeque<ControlOut>,
+    read_queue: VecDeque<ControlIn>,
+    dead: bool,
+}
+
+impl ControlConnection {
+    fn read(&mut self) -> io::Result<()> {
+        let mut read = self.read_buf.with(&mut self.stream);
+        loop {
+            let mut consumed = 0;
+            {
+                let mut buffer = read.fill_buf()?;
+                if buffer.is_empty() {
+                    return Err(io::ErrorKind::UnexpectedEof.into());
+                }
+                // 4 bytes length followed by json
+                while buffer.len() >= 4 {
+                    let len = 4 + (&buffer[..]).read_u32::<BigEndian>().unwrap() as usize;
+                    if buffer.len() < len {
+                        break;  // incomplete
+                    }
+                    if let Ok(msg) = ::serde_json::from_slice::<ControlIn>(&buffer[4..len]) {
+                        println!("CONTROL IN: {:?}", msg);
+                        self.read_queue.push_back(msg);
+                    }
+                    consumed += len;
+                    buffer = &buffer[len..];
+                }
+            }
+            read.consume(consumed);
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+enum ControlIn {
+    Debug(String),
+}
+
+#[derive(Serialize, Debug, Clone)]
+enum ControlOut {
+    Debug(String),
 }
 
 // ----------------------------------------------------------------------------
