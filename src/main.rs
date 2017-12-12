@@ -64,6 +64,14 @@ enum ControlIn {
         who: String,
         z: Z,
     },
+    SetLanguages {
+        who: String,
+        known: HashSet<String>,
+    },
+    SetSpokenLanguage {
+        who: String,
+        spoken: String,
+    },
     SetGhost(String),
     Linkage(HashMap<String, i32>),
 }
@@ -157,6 +165,8 @@ impl Server {
                 ControlIn::SetHearFreqs { who, hear } => with_client!(who; |c| c.hear_freqs = hear),
                 ControlIn::SetHotFreqs { who, hot } => with_client!(who; |c| c.hot_freqs = hot),
                 ControlIn::SetZ { who, z } => with_client!(who; |c| c.z = z),
+                ControlIn::SetLanguages { who, known } => with_client!(who; |c| c.known_languages = known),
+                ControlIn::SetSpokenLanguage { who, spoken } => with_client!(who; |c| c.current_language = spoken),
                 ControlIn::SetGhost(who) => with_client!(who; |c| c.z = 0),
             }
         }
@@ -225,8 +235,8 @@ impl Client {
             ckey: String::new(),
             deaf: false,
             mute: false,
-            current_language: "common".to_owned(),
-            known_languages: Some("common".to_owned()).into_iter().collect(),
+            current_language: "/datum/language/common".to_owned(),
+            known_languages: std::iter::once("/datum/language/common".to_owned()).collect(),
             local_with: HashSet::new(),
             push_to_talk: None,
             hot_freqs: HashSet::new(),
@@ -359,8 +369,6 @@ impl Client {
                     others.for_each(|other| {
                         if other.deaf || other.ckey.is_empty() { return }
 
-                        let lang = &self.current_language;
-                        let lang_known = other.known_languages.contains(lang);
                         let ptt_heard = match self.push_to_talk {
                             Some(freq) if other.hear_freqs.contains(&freq) => Some(freq),
                             _ => None,
@@ -390,7 +398,7 @@ impl Client {
                                 });
                             }
                         }
-                        if heard && lang_known {
+                        if heard && other.known_languages.contains(&self.current_language) {
                             other.sender.send_voice(self.session, seq, audio.to_owned());
                         }
                     });
