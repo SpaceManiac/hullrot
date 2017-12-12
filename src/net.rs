@@ -182,6 +182,7 @@ pub fn server_thread(init: Init) {
                     }
                     break;
                 } else if let Some(event) = control.write_queue.pop_front() {
+                    println!("CONTROL OUT: {:?}", event);
                     let vec = match ::serde_json::to_vec(&event) {
                         Ok(vec) => vec,
                         Err(e) => { println!("CONTROL: serialize error: {:?}", e); break; }
@@ -332,6 +333,7 @@ pub type Sample = i16;
 #[derive(Clone, Debug)]
 pub struct PacketChannel(mpsc::Sender<Command>);
 
+#[derive(Debug)]
 pub enum Command {
     Packet(Packet),
     VoiceData {

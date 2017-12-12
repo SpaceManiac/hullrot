@@ -22,6 +22,7 @@ macro_rules! packet {
 pub mod net;
 
 use std::collections::{VecDeque, HashMap, HashSet};
+use std::time::{Instant, Duration};
 use std::borrow::Cow;
 
 pub fn main() {
@@ -67,7 +68,7 @@ enum ControlIn {
     Linkage(HashMap<String, i32>),
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 enum ControlOut {
     Version {
         version: &'static str,
@@ -84,7 +85,7 @@ enum ControlOut {
     },
     HearSelf {
         who: String,
-        freq: Freq,
+        freq: Option<Freq>,
     },
 }
 
@@ -98,6 +99,7 @@ pub struct Server {
     // state
     playing: bool,
     linkage: HashMap<Z, i32>,
+    dedup: HashMap<ControlOut, Instant>,
 }
 
 impl Server {
@@ -107,10 +109,12 @@ impl Server {
             write_queue: VecDeque::new(),
             playing: false,
             linkage: HashMap::new(),
+            dedup: HashMap::new(),
         }
     }
 
     fn connect(&mut self) {
+        self.write_queue.clear();
         self.write_queue.push_back(ControlOut::Version {
             version: env!("CARGO_PKG_VERSION"),
             major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
@@ -127,7 +131,7 @@ impl Server {
         macro_rules! with_client {
             ($name:expr; |$c:ident| $closure:expr) => {{
                 let mut once = Some(|$c: &mut Client| $closure);
-                _clients.for_each(|c| if c.username.as_ref().map_or(false, |n| *n == $name) {
+                _clients.for_each(|c| if c.ckey == $name {
                     if let Some(cl) = once.take() { cl(c); }
                 })
             }}
@@ -155,8 +159,18 @@ impl Server {
 
         // ...
     }
+
+    fn write_with_cooldown(&mut self, ms: u64, message: ControlOut) {
+        let now = Instant::now();
+        self.dedup.retain(|_, v| *v >= now);
+        if !self.dedup.contains_key(&message) {
+            self.dedup.insert(message.clone(), now + Duration::from_millis(ms));
+            self.write_queue.push_back(message);
+        }
+    }
 }
 
+#[derive(Debug)]
 pub struct Client {
     // used by networking
     sender: net::PacketChannel,
@@ -335,6 +349,7 @@ impl Client {
                         continue
                     }
 
+                    // Transmit to anyone who can hear us
                     others.for_each(|other| {
                         if other.deaf || other.ckey.is_empty() { return }
 
@@ -348,11 +363,10 @@ impl Client {
                             .and_then(|&a| server.linkage.get(&other.z).map(|&b| (a, b)))
                             .map_or(self.z == other.z, |(a, b)| a == b);
 
-                        //println!("{} -> {} -- {}={} {}/{}/{}", self, other, lang, lang_known, local_heard, ptt_heard, hot_heard);
                         let mut heard = false;
                         if self.local_with.contains(&other.ckey) {
                             heard = true;
-                            server.write_queue.push_back(ControlOut::Hear {
+                            server.write_with_cooldown(10_000, ControlOut::Hear {
                                 hearer: other.ckey.to_owned(),
                                 speaker: self.ckey.to_owned(),
                                 freq: None,
@@ -362,7 +376,7 @@ impl Client {
                         if shared_z {
                             for freq in self.hot_freqs.intersection(&other.hear_freqs).cloned().chain(ptt_heard) {
                                 heard = true;
-                                server.write_queue.push_back(ControlOut::Hear {
+                                server.write_with_cooldown(10_000, ControlOut::Hear {
                                     hearer: other.ckey.to_owned(),
                                     speaker: self.ckey.to_owned(),
                                     freq: Some(freq),
@@ -375,14 +389,19 @@ impl Client {
                         }
                     });
 
+                    // Let us know if we can hear ourselves
+                    server.write_with_cooldown(10_000, ControlOut::HearSelf {
+                        who: self.ckey.to_owned(),
+                        freq: None,
+                    });
                     let ptt_hear_self = match self.push_to_talk {
                         Some(freq) if self.hear_freqs.contains(&freq) => Some(freq),
                         _ => None,
                     };
                     for freq in self.hot_freqs.intersection(&self.hear_freqs).cloned().chain(ptt_hear_self) {
-                        server.write_queue.push_back(ControlOut::HearSelf {
+                        server.write_with_cooldown(10_000, ControlOut::HearSelf {
                             who: self.ckey.to_owned(),
-                            freq: freq,
+                            freq: Some(freq),
                         });
                     }
                 }
