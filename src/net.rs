@@ -655,9 +655,12 @@ impl ControlConnection {
                     if buffer.len() < len {
                         break;  // incomplete
                     }
-                    if let Ok(msg) = ::serde_json::from_slice::<ControlIn>(&buffer[4..len]) {
-                        println!("CONTROL IN: {:?}", msg);
-                        read_queue.push_back(msg);
+                    match ::serde_json::from_slice::<ControlIn>(&buffer[4..len]) {
+                        Ok(msg) => {
+                            println!("CONTROL IN: {:?}", msg);
+                            read_queue.push_back(msg);
+                        }
+                        Err(e) => println!("CONTROL in error: {:?}", e)
                     }
                     consumed += len;
                     buffer = &buffer[len..];

@@ -21,7 +21,7 @@ macro_rules! packet {
 
 pub mod net;
 
-use std::collections::{VecDeque, HashSet};
+use std::collections::{VecDeque, HashMap, HashSet};
 use std::borrow::Cow;
 
 pub fn main() {
@@ -31,20 +31,61 @@ pub fn main() {
 // ----------------------------------------------------------------------------
 // Control procotol
 
+type Freq = u16;
+type Z = i32;
+
 #[derive(Deserialize, Debug, Clone)]
 enum ControlIn {
     Debug(String),
+    Playing(i32),
+    SetMobFlags {
+        who: String,
+        speak: i32,
+        hear: i32,
+    },
+    SetPTT {
+        who: String,
+        freq: Option<Freq>,
+    },
+    SetLocalWith {
+        who: String,
+        with: HashSet<String>,
+    },
+    SetHearFreqs {
+        who: String,
+        hear: HashSet<Freq>,
+    },
+    SetHotFreqs {
+        who: String,
+        hot: HashSet<Freq>,
+    },
+    SetZ {
+        who: String,
+        z: Z,
+    },
+    SetGhost(String),
+    Linkage(HashMap<String, i32>),
 }
 
 #[derive(Serialize, Debug, Clone)]
 enum ControlOut {
-    Debug(String),
     Version {
         version: &'static str,
         major: u32,
         minor: u32,
         patch: u32,
-    }
+    },
+    Refresh(String),
+    Hear {
+        hearer: String,
+        speaker: String,
+        freq: Option<Freq>,
+        language: String,
+    },
+    HearSelf {
+        who: String,
+        freq: Freq,
+    },
 }
 
 // ----------------------------------------------------------------------------
@@ -55,7 +96,8 @@ pub struct Server {
     read_queue: VecDeque<ControlIn>,
     write_queue: VecDeque<ControlOut>,
     // state
-    control_connected: bool,
+    playing: bool,
+    linkage: HashMap<Z, i32>,
 }
 
 impl Server {
@@ -63,12 +105,12 @@ impl Server {
         Server {
             read_queue: VecDeque::new(),
             write_queue: VecDeque::new(),
-            control_connected: false,
+            playing: false,
+            linkage: HashMap::new(),
         }
     }
 
     fn connect(&mut self) {
-        self.control_connected = true;
         self.write_queue.push_back(ControlOut::Version {
             version: env!("CARGO_PKG_VERSION"),
             major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
@@ -78,12 +120,37 @@ impl Server {
     }
 
     fn disconnect(&mut self) {
-        self.control_connected = false;
+        self.playing = false;
     }
 
     fn tick(&mut self, mut _clients: net::Everyone) {
-        while let Some(_) = self.read_queue.pop_front() {
-            // ...
+        macro_rules! with_client {
+            ($name:expr; |$c:ident| $closure:expr) => {{
+                let mut once = Some(|$c: &mut Client| $closure);
+                _clients.for_each(|c| if c.username.as_ref().map_or(false, |n| *n == $name) {
+                    if let Some(cl) = once.take() { cl(c); }
+                })
+            }}
+        }
+
+        while let Some(control_in) = self.read_queue.pop_front() {
+            match control_in {
+                ControlIn::Debug(msg) => println!("CONTROL dbg: {}", msg),
+                ControlIn::Playing(playing) => self.playing = playing != 0,
+                ControlIn::Linkage(map) => {
+                    self.linkage = map.into_iter().map(|(k, v)| (k.parse().unwrap(), v)).collect();
+                },
+                ControlIn::SetMobFlags { who, speak, hear } => with_client!(who; |c| {
+                    c.mute = speak == 0;
+                    c.deaf = hear == 0;
+                }),
+                ControlIn::SetPTT { who, freq } => with_client!(who; |c| c.push_to_talk = freq),
+                ControlIn::SetLocalWith { who, with } => with_client!(who; |c| c.local_with = with),
+                ControlIn::SetHearFreqs { who, hear } => with_client!(who; |c| c.hear_freqs = hear),
+                ControlIn::SetHotFreqs { who, hot } => with_client!(who; |c| c.hot_freqs = hot),
+                ControlIn::SetZ { who, z } => with_client!(who; |c| c.z = z),
+                ControlIn::SetGhost(who) => with_client!(who; |c| c.z = 0),
+            }
         }
 
         // ...
@@ -101,14 +168,16 @@ pub struct Client {
     session: u32,
     username: Option<String>,
     // language and radio information
+    z: Z,  // the Z-level, for subspace comms
+    ckey: String,
     mute: bool,  // mute (e.g. unconscious, muzzled, no tongue)
     deaf: bool,  // deaf (e.g. unconscious, flashbanged, genetic damage)
     current_language: String,
     known_languages: HashSet<String>,
-    local_with: HashSet<String>,  // list of nearby usernames we can hear
-    push_to_talk: Option<u16>,  // current PTT channel, or None for local
-    speaking_radio: HashSet<u16>,  // hot radio channels
-    listening_radio: HashSet<u16>,  // heard radio channels, e.g. 1459 for common
+    local_with: HashSet<String>,  // list of nearby usernames who hear us
+    push_to_talk: Option<Freq>,  // current PTT channel, or None for local
+    hot_freqs: HashSet<Freq>,  // hot radio channels
+    hear_freqs: HashSet<Freq>,  // heard radio channels, e.g. 1459 for common
 }
 
 impl Client {
@@ -132,14 +201,16 @@ impl Client {
             username: None,
             events: VecDeque::new(),
 
+            z: 0,
+            ckey: String::new(),
             deaf: false,
             mute: false,
             current_language: "common".to_owned(),
             known_languages: Some("common".to_owned()).into_iter().collect(),
             local_with: HashSet::new(),
             push_to_talk: None,
-            speaking_radio: HashSet::new(),
-            listening_radio: Some(1459).into_iter().collect(),
+            hot_freqs: HashSet::new(),
+            hear_freqs: HashSet::new(),
         }
     }
 
@@ -175,6 +246,8 @@ impl Client {
                     }
                     println!("{} logged in as {}", self, name);
                     self.username = Some(name.to_owned());
+                    self.ckey = ckey(name);
+                    server.write_queue.push_back(ControlOut::Refresh(self.ckey.to_owned()));
 
                     let mut permissions = Permissions::TRAVERSE | Permissions::SPEAK;
                     if self.admin {
@@ -250,34 +323,68 @@ impl Client {
                 },
                 Command::Packet(_) => {},
                 Command::VoiceData { who: _, seq, audio } => {
-                    if !server.control_connected {
-                        // if there's no control connection, it's a free-for-all
+                    if !server.playing {
+                        // no server connection or pre/post-game
                         others.for_each(|other| {
                             other.sender.send_voice(self.session, seq, audio.to_owned());
                         });
-                        return
+                        continue
                     } else if self.mute {
-                        return  // bodily mute
+                        continue  // bodily mute
+                    } else if self.ckey.is_empty() {
+                        continue
                     }
 
-                    let username = match self.username {
-                        Some(ref username) => username,
-                        None => continue,
-                    };
-
                     others.for_each(|other| {
-                        if other.deaf { return }
+                        if other.deaf || other.ckey.is_empty() { return }
+
                         let lang = &self.current_language;
                         let lang_known = other.known_languages.contains(lang);
-                        let local_heard = other.local_with.contains(username);
-                        let ptt_heard = self.push_to_talk.map_or(false, |freq| other.listening_radio.contains(&freq));
-                        let hot_heard = self.speaking_radio.intersection(&other.listening_radio).next().is_some();
+                        let ptt_heard = match self.push_to_talk {
+                            Some(freq) if other.hear_freqs.contains(&freq) => Some(freq),
+                            _ => None,
+                        };
+                        let shared_z = server.linkage.get(&self.z)
+                            .and_then(|&a| server.linkage.get(&other.z).map(|&b| (a, b)))
+                            .map_or(self.z == other.z, |(a, b)| a == b);
 
                         //println!("{} -> {} -- {}={} {}/{}/{}", self, other, lang, lang_known, local_heard, ptt_heard, hot_heard);
-                        if lang_known && (local_heard || ptt_heard || hot_heard) {
+                        let mut heard = false;
+                        if self.local_with.contains(&other.ckey) {
+                            heard = true;
+                            server.write_queue.push_back(ControlOut::Hear {
+                                hearer: other.ckey.to_owned(),
+                                speaker: self.ckey.to_owned(),
+                                freq: None,
+                                language: self.current_language.to_owned(),
+                            });
+                        }
+                        if shared_z {
+                            for freq in self.hot_freqs.intersection(&other.hear_freqs).cloned().chain(ptt_heard) {
+                                heard = true;
+                                server.write_queue.push_back(ControlOut::Hear {
+                                    hearer: other.ckey.to_owned(),
+                                    speaker: self.ckey.to_owned(),
+                                    freq: Some(freq),
+                                    language: self.current_language.to_owned(),
+                                });
+                            }
+                        }
+                        if heard && lang_known {
                             other.sender.send_voice(self.session, seq, audio.to_owned());
                         }
-                    })
+                    });
+
+                    let ptt_hear_self = match self.push_to_talk {
+                        Some(freq) if self.hear_freqs.contains(&freq) => Some(freq),
+                        _ => None,
+                    };
+                    for freq in self.hot_freqs.intersection(&self.hear_freqs).cloned().chain(ptt_hear_self) {
+                        server.write_queue.push_back(ControlOut::HearSelf {
+                            who: self.ckey.to_owned(),
+                            freq: freq,
+                        });
+                    }
                 }
             }
         }
@@ -292,4 +399,8 @@ impl std::fmt::Display for Client {
             write!(fmt, "({}/{})", self.session, self.remote)
         }
     }
+}
+
+fn ckey(name: &str) -> String {
+    name.chars().filter(|c| c.is_ascii() && c.is_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect()
 }
