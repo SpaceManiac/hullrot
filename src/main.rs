@@ -94,11 +94,13 @@ enum ControlOut {
     HearSelf {
         who: String,
         freq: Option<Freq>,
+        language: String,
     },
     SpeechBubble {
         who: String,
         with: Vec<String>,
     },
+    CannotSpeak(String),
 }
 
 // ----------------------------------------------------------------------------
@@ -360,6 +362,7 @@ impl Client {
                         });
                         continue
                     } else if self.mute {
+                        server.write_with_cooldown(10_000, ControlOut::CannotSpeak(self.ckey.to_owned()));
                         continue  // bodily mute
                     } else if self.ckey.is_empty() {
                         continue
@@ -403,11 +406,14 @@ impl Client {
                         }
                     });
 
-                    // Let us know if we can hear ourselves
-                    server.write_with_cooldown(10_000, ControlOut::HearSelf {
-                        who: self.ckey.to_owned(),
-                        freq: None,
-                    });
+                    // Let us know if we cannot hear ourselves
+                    if self.deaf {
+                        server.write_with_cooldown(10_000, ControlOut::HearSelf {
+                            who: self.ckey.to_owned(),
+                            freq: None,
+                            language: self.current_language.to_owned(),
+                        });
+                    }
                     let ptt_hear_self = match self.push_to_talk {
                         Some(freq) if self.hear_freqs.contains(&freq) => Some(freq),
                         _ => None,
@@ -416,6 +422,7 @@ impl Client {
                         server.write_with_cooldown(10_000, ControlOut::HearSelf {
                             who: self.ckey.to_owned(),
                             freq: Some(freq),
+                            language: self.current_language.to_owned(),
                         });
                     }
 
