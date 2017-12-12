@@ -261,7 +261,7 @@ pub fn server_thread(init: Init) {
                                     Err(e) => { io_error(&mut connection.client, e); break }
                                 }
                             }
-                            Command::VoiceData { who, seq, audio } => {
+                            Command::VoiceData { who, seq, audio, end } => {
                                 // Encode the audio
                                 let len = connection.encoder.encode(&audio, &mut udp_buf).unwrap();
 
@@ -276,7 +276,7 @@ pub fn server_thread(init: Init) {
                                 let _ = write_varint(&mut encoded, who as i64);  // session of source user
                                 let _ = write_varint(&mut encoded, seq);  // sequence number
                                 let _ = write_varint(&mut encoded, len as i64);  // opus header
-                                let total_len = encoded.len() + len - start;
+                                let total_len = encoded.len() + len - start | if end { 0x2000 } else { 0 };
                                 let _ = (&mut encoded[2..6]).write_u32::<BigEndian>(total_len as u32);
 
                                 //println!("OUT: voice: who={} seq={} audio={} tiny={} big={}", who, seq, audio.len(), len, total_len);
@@ -340,6 +340,7 @@ pub enum Command {
         who: u32,
         seq: i64,
         audio: Vec<Sample>,
+        end: bool,
     },
 }
 
@@ -351,7 +352,7 @@ impl PacketChannel {
 
     #[inline]
     pub fn send_voice(&self, who: u32, seq: i64, audio: Vec<Sample>) -> bool {
-        self.0.send(Command::VoiceData { who, seq, audio }).is_ok()
+        self.0.send(Command::VoiceData { who, seq, audio, end: false }).is_ok()
     }
 }
 
@@ -536,6 +537,7 @@ fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder) -> 
         who: 0,
         seq: sequence_number,
         audio: output[..len].to_owned(),
+        end: terminator,
     });
     Ok(())
 }

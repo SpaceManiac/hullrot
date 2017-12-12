@@ -87,6 +87,10 @@ enum ControlOut {
         who: String,
         freq: Option<Freq>,
     },
+    SpeechBubble {
+        who: String,
+        with: Vec<String>,
+    },
 }
 
 // ----------------------------------------------------------------------------
@@ -182,8 +186,9 @@ pub struct Client {
     session: u32,
     username: Option<String>,
     // language and radio information
-    z: Z,  // the Z-level, for subspace comms
     ckey: String,
+    z: Z,  // the Z-level, for subspace comms
+    speaking: bool,
     mute: bool,  // mute (e.g. unconscious, muzzled, no tongue)
     deaf: bool,  // deaf (e.g. unconscious, flashbanged, genetic damage)
     current_language: String,
@@ -216,6 +221,7 @@ impl Client {
             events: VecDeque::new(),
 
             z: 0,
+            speaking: false,
             ckey: String::new(),
             deaf: false,
             mute: false,
@@ -336,7 +342,7 @@ impl Client {
                     });
                 },
                 Command::Packet(_) => {},
-                Command::VoiceData { who: _, seq, audio } => {
+                Command::VoiceData { who: _, seq, audio, end } => {
                     if !server.playing {
                         // no server connection or pre/post-game
                         others.for_each(|other| {
@@ -402,6 +408,21 @@ impl Client {
                         server.write_with_cooldown(10_000, ControlOut::HearSelf {
                             who: self.ckey.to_owned(),
                             freq: Some(freq),
+                        });
+                    }
+
+                    // Show or hide speech bubbles
+                    if end {
+                        self.speaking = false;
+                        server.write_queue.push_back(ControlOut::SpeechBubble {
+                            who: self.ckey.to_owned(),
+                            with: Vec::new(),
+                        });
+                    } else if !self.speaking {
+                        self.speaking = true;
+                        server.write_queue.push_back(ControlOut::SpeechBubble {
+                            who: self.ckey.to_owned(),
+                            with: self.local_with.iter().chain(std::iter::once(&self.ckey)).cloned().collect(),
                         });
                     }
                 }
