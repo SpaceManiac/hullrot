@@ -24,6 +24,7 @@ pub mod net;
 use std::collections::{VecDeque, HashMap, HashSet};
 use std::time::{Instant, Duration};
 use std::borrow::Cow;
+use std::iter::once;
 
 pub fn main() {
     net::server_thread(net::init_server().unwrap());
@@ -34,6 +35,9 @@ pub fn main() {
 
 type Freq = u16;
 type Z = i32;
+
+const DEADCHAT: Freq = 1;
+const GALCOM: &str = "/datum/language/common";
 
 #[derive(Deserialize, Debug, Clone)]
 enum ControlIn {
@@ -169,7 +173,17 @@ impl Server {
                 ControlIn::SetZ { who, z } => with_client!(who; |c| c.z = z),
                 ControlIn::SetLanguages { who, known } => with_client!(who; |c| c.known_languages = known),
                 ControlIn::SetSpokenLanguage { who, spoken } => with_client!(who; |c| c.current_language = spoken),
-                ControlIn::SetGhost(who) => with_client!(who; |c| c.z = 0),
+                ControlIn::SetGhost(who) => with_client!(who; |c| {
+                    c.z = 0;
+                    c.mute = false;
+                    c.deaf = false;
+                    c.current_language = GALCOM.to_owned();
+                    c.known_languages = once(GALCOM.to_owned()).collect();
+                    c.local_with.clear();
+                    c.push_to_talk = None;
+                    c.hot_freqs = once(DEADCHAT).collect();
+                    c.hear_freqs = once(DEADCHAT).collect();
+                }),
             }
         }
 
@@ -237,8 +251,8 @@ impl Client {
             ckey: String::new(),
             deaf: false,
             mute: false,
-            current_language: "/datum/language/common".to_owned(),
-            known_languages: std::iter::once("/datum/language/common".to_owned()).collect(),
+            current_language: GALCOM.to_owned(),
+            known_languages: once(GALCOM.to_owned()).collect(),
             local_with: HashSet::new(),
             push_to_talk: None,
             hot_freqs: HashSet::new(),
@@ -437,7 +451,7 @@ impl Client {
                         self.speaking = true;
                         server.write_queue.push_back(ControlOut::SpeechBubble {
                             who: self.ckey.to_owned(),
-                            with: self.local_with.iter().chain(std::iter::once(&self.ckey)).cloned().collect(),
+                            with: self.local_with.iter().chain(once(&self.ckey)).cloned().collect(),
                         });
                     }
                 }

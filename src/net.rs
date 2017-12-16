@@ -327,7 +327,7 @@ pub fn is_loopback(remote: &SocketAddr) -> bool {
 const SAMPLE_RATE: u32 = 48000;
 const CHANNELS: Channels = Channels::Mono;
 const APPLICATION: Application = Application::Voip;
-const BITRATE: Bitrate = Bitrate::Bits(40000);
+const BITRATE: Bitrate = Bitrate::Bits(64_000);
 pub type Sample = i16;
 
 #[derive(Clone, Debug)]
