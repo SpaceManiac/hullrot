@@ -263,7 +263,14 @@ pub fn server_thread(init: Init) {
                             }
                             Command::VoiceData { who, seq, audio, end } => {
                                 // Encode the audio
-                                let len = connection.encoder.encode(&audio, &mut udp_buf).unwrap();
+                                let len = connection.encoders.entry(who)
+                                    .or_insert_with(|| {
+                                        let mut encoder = Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION).unwrap();
+                                        encoder.set_bitrate(BITRATE).unwrap();
+                                        encoder.set_vbr(false).unwrap();
+                                        encoder
+                                    })
+                                    .encode(&audio, &mut udp_buf).unwrap();
 
                                 // Construct the UDPTunnel packet
                                 let mut encoded = Vec::new();
@@ -404,20 +411,17 @@ struct Connection {
     write_rx: mpsc::Receiver<Command>,
     client: Client,
     decoder: Decoder,
-    encoder: Encoder,
+    encoders: HashMap<u32, Encoder>,
 }
 
 impl Connection {
     fn new(session: u32, remote: SocketAddr, stream: Stream) -> Connection {
         let (tx, rx) = mpsc::channel();
         let decoder = Decoder::new(SAMPLE_RATE, CHANNELS).unwrap();
-        let mut encoder = Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION).unwrap();
-        encoder.set_bitrate(BITRATE).unwrap();
-        encoder.set_vbr(false).unwrap();
         Connection {
             stream,
-            encoder,
             decoder,
+            encoders: HashMap::new(),
             read_buf: BufReader::new(),
             write_buf: BufWriter::new(),
             write_rx: rx,
