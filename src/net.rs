@@ -275,11 +275,11 @@ pub fn server_thread(init: Init) {
                                 let _ = encoded.write_u8(128);  // header byte, opus on normal channel
                                 let _ = write_varint(&mut encoded, who as i64);  // session of source user
                                 let _ = write_varint(&mut encoded, seq);  // sequence number
-                                let _ = write_varint(&mut encoded, len as i64);  // opus header
-                                let total_len = encoded.len() + len - start | if end { 0x2000 } else { 0 };
+                                let _ = write_varint(&mut encoded, (len | if end { 0x2000 } else { 0 }) as i64);  // opus header
+                                let total_len = encoded.len() + len - start;
                                 let _ = (&mut encoded[2..6]).write_u32::<BigEndian>(total_len as u32);
 
-                                //println!("OUT: voice: who={} seq={} audio={} tiny={} big={}", who, seq, audio.len(), len, total_len);
+                                //println!("OUT: voice: who={} seq={} audio={} tiny={} big={} end={}", who, seq, audio.len(), len, total_len, end);
 
                                 let mut out = connection.write_buf.with(stream);
                                 match (|| {
