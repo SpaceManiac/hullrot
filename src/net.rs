@@ -296,12 +296,11 @@ pub fn server_thread(init: Init) {
                     }
                 }
 
-                // should run in lockstep, but separate for lifetime reasons
-                if connection.client.disconnected.is_some() {
-                    connection.client.quit(&mut control, Everyone(before, after));
-                }
-                if let Some(ref message) = connection.client.disconnected {
+                // disconnect those who should be disconnected
+                if let Some(message) = connection.client.disconnected.take() {
                     println!("{} quit: {}", connection.client, message);
+                    connection.client.disconnected = Some(message);  // for quit() and the drop at the end
+                    connection.client.quit(&mut control, Everyone(before, after));
                     if let Some(tcp) = connection.stream.inner() {
                         poll.deregister(tcp).unwrap();
                     }
