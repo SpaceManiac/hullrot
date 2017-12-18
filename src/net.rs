@@ -48,6 +48,7 @@ pub fn init_server() -> Result<Init, Box<::std::error::Error>> {
 
     let poll = Poll::new()?;
     let addr = "0.0.0.0:64738".parse()?;
+    println!("Binding tcp/{}", addr);
     let server = TcpListener::bind(&addr)?;
     poll.register(&server, TCP_SERVER, Ready::readable(), PollOpt::edge())?;
 
@@ -56,6 +57,7 @@ pub fn init_server() -> Result<Init, Box<::std::error::Error>> {
     let mut udp_writable = true;*/
 
     let addr = "127.0.0.1:10961".parse()?;  // accept local control connections only
+    println!("Binding tcp/{}", addr);
     let control_server = TcpListener::bind(&addr)?;
     poll.register(&control_server, CONTROL_SERVER, Ready::readable(), PollOpt::edge())?;
 
@@ -73,6 +75,7 @@ pub fn server_thread(init: Init) {
     let mut control = Server::new();
     let mut control_client: Option<ControlConnection> = None;
 
+    println!("Started");
     loop {
         poll.poll(&mut events, Some(::std::time::Duration::from_millis(5))).unwrap();
 
