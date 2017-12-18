@@ -529,8 +529,14 @@ fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder) -> 
     }
     let opus_packet = &buffer[..opus_length as usize];
 
-    let mut output = [0i16; 960 * 2];
-    let len = decoder.decode(opus_packet, &mut output, false).unwrap();
+    let mut output = [0i16; 960 * 4];
+    let len = match decoder.decode(opus_packet, &mut output, false) {
+        Ok(len) => len,
+        Err(e) => {
+            println!("DECODE ERROR: {}: {:?}", client, e);
+            return Ok(());
+        }
+    };
 
     /*println!("IN: voice: seq={} rem={} enc={} dec={}",
         sequence_number,
