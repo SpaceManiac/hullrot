@@ -41,7 +41,9 @@ pub fn init_server() -> Result<Init, Box<::std::error::Error>> {
         ECDHE-ECDSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-SHA:\
         DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA")?;
     ctx.set_verify(SSL_VERIFY_NONE);
+    println!("Loading data/hullrot/cert.pem");
     ctx.set_certificate_file("data/hullrot/cert.pem", x509::X509_FILETYPE_PEM)?;
+    println!("Loading data/hullrot/key.pem");
     ctx.set_private_key_file("data/hullrot/key.pem", x509::X509_FILETYPE_PEM)?;
     ctx.check_private_key()?;
     let ctx = ctx.build();
@@ -253,7 +255,7 @@ pub fn server_thread(init: Init) {
                             Command::Packet(packet) => {
                                 match packet {
                                     Packet::Ping(_) => {}
-                                    _ => println!("OUT: {:?}", packet)
+                                    _ => {} //println!("OUT: {:?}", packet)
                                 }
                                 let encoded = match packet.encode() {
                                     Ok(v) => v,
@@ -485,7 +487,7 @@ fn read_packets<R: BufRead + ?Sized>(read: &mut R, client: &mut Client, decoder:
                             set_timestamp: ping.get_timestamp(),
                         });
                     } else {
-                        println!("IN: {:?}", packet);
+                        //println!("IN: {:?}", packet);
                     }
                     client.events.push_back(Command::Packet(packet));
                 }

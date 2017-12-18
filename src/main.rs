@@ -27,6 +27,7 @@ use std::borrow::Cow;
 use std::iter::once;
 
 pub fn main() {
+    println!("Running in {}", std::env::current_dir().unwrap().display());
     net::server_thread(net::init_server().unwrap());
 }
 
@@ -331,12 +332,6 @@ impl Client {
                         set_channel_id: 0,
                         set_permissions: permissions.bits(),
                     });
-                    /*self.sender.send(packet! { UserState;
-                        set_session: 1,
-                        set_channel_id: 0,
-                        set_name: "System".to_owned(),
-                        set_hash: "0000000000000000000000000000000000000000".into(),
-                    });*/
                     self.sender.send(packet! { UserState;
                         set_session: self.session,
                         set_channel_id: 0,
