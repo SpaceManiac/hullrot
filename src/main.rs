@@ -272,6 +272,16 @@ impl Client {
         }); });
     }
 
+    fn unspeak(&mut self, server: &mut Server) {
+        if self.speaking {
+            self.speaking = false;
+            server.write_queue.push_back(ControlOut::SpeechBubble {
+                who: self.ckey.to_owned(),
+                with: Vec::new(),
+            });
+        }
+    }
+
     fn tick(&mut self, server: &mut Server, mut others: net::Everyone) {
         use mumble_protocol::{Packet, Permissions};
         use net::Command;
@@ -374,11 +384,13 @@ impl Client {
                         others.for_each(|other| {
                             other.sender.send_voice(self.session, seq, audio.to_owned());
                         });
+                        self.unspeak(server);
                         continue
-                    } else if self.mute {
-                        server.write_with_cooldown(10_000, ControlOut::CannotSpeak(self.ckey.to_owned()));
-                        continue  // bodily mute
                     } else if self.ckey.is_empty() {
+                        continue
+                    } else if self.mute {  // bodily mute
+                        server.write_with_cooldown(10_000, ControlOut::CannotSpeak(self.ckey.to_owned()));
+                        self.unspeak(server);
                         continue
                     }
 
@@ -442,11 +454,7 @@ impl Client {
 
                     // Show or hide speech bubbles
                     if end {
-                        self.speaking = false;
-                        server.write_queue.push_back(ControlOut::SpeechBubble {
-                            who: self.ckey.to_owned(),
-                            with: Vec::new(),
-                        });
+                        self.unspeak(server);
                     } else if !self.speaking {
                         self.speaking = true;
                         server.write_queue.push_back(ControlOut::SpeechBubble {
