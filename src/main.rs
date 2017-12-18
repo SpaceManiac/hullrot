@@ -1,3 +1,18 @@
+/*
+Hullrot is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+Hullrot is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 //! Hullrot is a minimalist Mumble server designed for immersive integration
 //! with the roleplaying spaceman simulator Space Station 13.
 extern crate mio;
@@ -364,6 +379,8 @@ impl Client {
                         set_message_length: 2000,
                         set_image_message_length: 131072,
                         set_max_users: 100,
+                        set_welcome_text: "Hullrot is <a href=\"https://github.com/SpaceManiac/hullrot/\">free software</a> \
+                            available under the GNU Affero General Public License.".to_owned(),
                     });
                 },
                 Command::Packet(Packet::UserRemove(ref remove)) if self.admin => {
