@@ -360,13 +360,13 @@ impl Client {
                             other.sender.send(packet! { UserState;
                                 set_session: self.session,
                                 set_channel_id: 0,
-                                set_name: if other.admin { name.to_owned() } else { "???".to_owned() },
+                                set_name: name.to_owned(),
                                 set_hash: "0000000000000000000000000000000000000000".into(),
                             });
                             self.sender.send(packet! { UserState;
                                 set_session: other.session,
                                 set_channel_id: 0,
-                                set_name: if self.admin { username.to_owned() } else { "???".to_owned() },
+                                set_name: username.to_owned(),
                                 set_hash: "0000000000000000000000000000000000000000".into(),
                             });
                         }
