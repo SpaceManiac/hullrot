@@ -233,6 +233,7 @@ pub struct Client {
     speaking: bool,
     mute: bool,  // mute (e.g. unconscious, muzzled, no tongue)
     deaf: bool,  // deaf (e.g. unconscious, flashbanged, genetic damage)
+    self_deaf: bool,  // deafened in the Mumble client
     current_language: String,
     known_languages: HashSet<String>,
     local_with: HashSet<String>,  // list of nearby usernames who hear us
@@ -265,8 +266,9 @@ impl Client {
             z: 0,
             speaking: false,
             ckey: String::new(),
-            deaf: false,
             mute: false,
+            deaf: false,
+            self_deaf: false,
             current_language: GALCOM.to_owned(),
             known_languages: once(GALCOM.to_owned()).collect(),
             local_with: HashSet::new(),
@@ -383,6 +385,11 @@ impl Client {
                             available under the GNU Affero General Public License.".to_owned(),
                     });
                 },
+                Command::Packet(Packet::UserState(ref state)) => {
+                    if state.has_self_deaf() {
+                        self.self_deaf = state.get_self_deaf();
+                    }
+                },
                 Command::Packet(Packet::UserRemove(ref remove)) if self.admin => {
                     let session = remove.get_session();
                     others.for_each(|other| if other.session == session {
@@ -394,6 +401,7 @@ impl Client {
                     if !server.playing {
                         // no server connection or pre/post-game
                         others.for_each(|other| {
+                            if other.self_deaf { return }
                             other.sender.send_voice(self.session, seq, audio.to_owned());
                         });
                         self.unspeak(server);
@@ -408,7 +416,7 @@ impl Client {
 
                     // Transmit to anyone who can hear us
                     others.for_each(|other| {
-                        if other.deaf || other.ckey.is_empty() { return }
+                        if other.self_deaf || other.deaf || other.ckey.is_empty() { return }
 
                         let ptt_heard = match self.push_to_talk {
                             Some(freq) if other.hear_freqs.contains(&freq) => Some(freq),
