@@ -202,8 +202,6 @@ impl Server {
                 }),
             }
         }
-
-        // ...
     }
 
     fn write_with_cooldown(&mut self, ms: u64, message: ControlOut) {
@@ -422,7 +420,7 @@ impl Client {
                             Some(freq) if other.hear_freqs.contains(&freq) => Some(freq),
                             _ => None,
                         };
-                        let shared_z = server.linkage.get(&self.z)
+                        let shared_z = other.ghost() || server.linkage.get(&self.z)
                             .and_then(|&a| server.linkage.get(&other.z).map(|&b| (a, b)))
                             .map_or(self.z == other.z, |(a, b)| a == b);
 
@@ -436,7 +434,7 @@ impl Client {
                                 language: self.current_language.to_owned(),
                             });
                         }
-                        if shared_z {
+                        if shared_z || other.ghost() {
                             for freq in self.hot_freqs.intersection(&other.hear_freqs).cloned().chain(ptt_heard) {
                                 heard = true;
                                 server.write_with_cooldown(10_000, ControlOut::Hear {
@@ -447,7 +445,7 @@ impl Client {
                                 });
                             }
                         }
-                        if heard && other.known_languages.contains(&self.current_language) {
+                        if heard && (other.known_languages.contains(&self.current_language) || other.ghost()) {
                             other.sender.send_voice(self.session, seq, audio.to_owned());
                         }
                     });
@@ -485,6 +483,10 @@ impl Client {
                 }
             }
         }
+    }
+
+    fn ghost(&self) -> bool {
+        self.z == 0
     }
 }
 
