@@ -164,8 +164,9 @@ impl Server {
     fn tick(&mut self, mut _clients: net::Everyone) {
         macro_rules! with_client {
             ($name:expr; |$c:ident| $closure:expr) => {{
+                let ckey = ckey(&$name);
                 let mut once = Some(|$c: &mut Client| $closure);
-                _clients.for_each(|c| if c.ckey == $name {
+                _clients.for_each(|c| if c.ckey == ckey {
                     if let Some(cl) = once.take() { cl(c); }
                 })
             }}
