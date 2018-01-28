@@ -317,11 +317,34 @@ impl Client {
                     if !auth.get_opus() {
                         return self.kick("No Opus support");
                     }
+
+                    // Log in as a new user or stealthily replace the old one
                     println!("{} logged in as {}", self, name);
                     self.username = Some(name.to_owned());
                     self.ckey = ckey(name);
                     server.write_queue.push_back(ControlOut::Refresh(self.ckey.to_owned()));
 
+                    let mut found_previous = false;
+                    others.for_each(|other| {
+                        use std::mem::replace;
+                        if other.ckey != self.ckey { return }
+                        found_previous = true;
+                        println!("{} inherited from {}", self, other);
+                        other.kick("Logged in from another client");
+                        self.session = replace(&mut other.session, 0);
+
+                        self.z = other.z;
+                        self.mute = other.mute;
+                        self.deaf = other.deaf;
+                        self.current_language = replace(&mut other.current_language, Default::default());
+                        self.known_languages = replace(&mut other.known_languages, Default::default());
+                        self.local_with = replace(&mut other.local_with, Default::default());
+                        self.push_to_talk = replace(&mut other.push_to_talk, Default::default());
+                        self.hot_freqs = replace(&mut other.hot_freqs, Default::default());
+                        self.hear_freqs = replace(&mut other.hear_freqs, Default::default());
+                    });
+
+                    // Bring the client up to speed
                     let mut permissions = Permissions::TRAVERSE | Permissions::SPEAK;
                     if self.admin {
                         permissions |= Permissions::KICK | Permissions::REGISTER | Permissions::REGISTER_SELF | Permissions::ENTER;
