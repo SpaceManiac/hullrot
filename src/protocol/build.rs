@@ -25,11 +25,12 @@ fn main() {
         out_dir: &out_dir,
         includes: &[],
     }) {
-        println!("Failed to run the protobuf code generator.");
-        println!("Ensure that `protoc` is available and on the PATH.");
-        println!();
-        println!("{}", e);
-        println!("{:?}", e);
+        eprintln!("Failed to run the protobuf code generator.");
+        eprintln!("Ensure that `protoc` is available and on the PATH.");
+        eprintln!();
+        eprintln!("{}", e);
+        eprintln!("{:?}", e);
+        std::process::exit(1);
     }
 
     // workaround for https://github.com/rust-lang/rust/issues/18810
