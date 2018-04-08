@@ -39,14 +39,15 @@ use {Client, Server, ControlIn};
 const TCP_SERVER: Token = Token(0);
 const CONTROL_SERVER: Token = Token(1);
 const CONTROL_CHANNEL: Token = Token(2);
-//const UDP_SOCKET: Token = Token(3);
-const FIRST_TOKEN: u32 = 3;
+const UDP_SOCKET: Token = Token(3);
+const FIRST_TOKEN: u32 = 4;
 
 pub struct Init {
     ctx: SslContext,
     poll: Poll,
     server: TcpListener,
     control_server: TcpListener,
+    udp: UdpSocket,
 }
 
 pub fn init_server() -> Result<Init, Box<::std::error::Error>> {
@@ -69,21 +70,22 @@ pub fn init_server() -> Result<Init, Box<::std::error::Error>> {
     let server = TcpListener::bind(&addr)?;
     poll.register(&server, TCP_SERVER, Ready::readable(), PollOpt::edge())?;
 
-    /*let udp = UdpSocket::bind(&addr).unwrap();
+    let udp = UdpSocket::bind(&addr).unwrap();
     poll.register(&udp, UDP_SOCKET, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
-    let mut udp_writable = true;*/
 
     let addr = "127.0.0.1:10961".parse()?;  // accept local control connections only
     println!("Binding tcp/{}", addr);
     let control_server = TcpListener::bind(&addr)?;
     poll.register(&control_server, CONTROL_SERVER, Ready::readable(), PollOpt::edge())?;
 
-    Ok(Init { ctx, poll, server, control_server })
+    Ok(Init { ctx, poll, server, control_server, udp })
 }
 
 pub fn server_thread(init: Init) {
-    let Init { ctx, poll, server, control_server } = init;
+    let Init { ctx, poll, server, control_server, udp } = init;
     let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit
+    let mut udp_writeable = true;
+    let mut udp_out_queue = VecDeque::new();
 
     let mut clients = HashMap::new();
     let mut events = Events::with_capacity(1024);
@@ -156,23 +158,48 @@ pub fn server_thread(init: Init) {
                         }
                     }
                 }
-            /*} else if event.token() == UDP_SOCKET {
+            } else if event.token() == UDP_SOCKET {
                 let readiness = event.readiness();
-                if readiness.is_readable() {
-                    loop {
-                        let (len, remote) = match udp.recv_from(&mut udp_buf[..]) {
-                            Ok(r) => r,
-                            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                            Err(e) => { println!("{:?}", e); continue },
-                        };
-                        let buf = &udp_buf[..len];
-                        println!("Got datagram, len = {}", len);
+                while readiness.is_readable() {
+                    let (len, remote) = match udp.recv_from(&mut udp_buf[..]) {
+                        Ok(r) => r,
+                        Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                        Err(e) => { println!("{:?}", e); continue },
+                    };
+                    let mut buf = &udp_buf[..len];
+                    match (|| -> Result<(), io::Error> {
+                        let request_type = buf.read_u32::<BigEndian>()?;
+                        match request_type {
+                            0 => {
+                                let ident = buf.read_u64::<BigEndian>()?;
+                                let mut output = Vec::with_capacity(20);
+                                // version: 1.3.0
+                                output.write_u8(0)?;
+                                output.write_u8(1)?;
+                                output.write_u8(3)?;
+                                output.write_u8(0)?;
+                                // write back the ident
+                                output.write_u64::<BigEndian>(ident)?;
+                                // currently connected users count
+                                output.write_u32::<BigEndian>(clients.len() as u32)?;
+                                // maximum user count
+                                output.write_u32::<BigEndian>(100)?;
+                                // allowed bandwidth
+                                output.write_u32::<BigEndian>(64_000)?;
+                                udp_out_queue.push_back((remote, output));
+                            }
+                            _ => { /* ignore */ }
+                        }
+                        Ok(())
+                    })() {
+                        Ok(()) => {}
+                        Err(e) => { println!("UDP in error: {:?}", e); }
                     }
                 }
                 if readiness.is_writable() {
                     udp_writeable = true;
-                }*/
+                }
             } else {
                 let connection = clients.get_mut(&event.token()).unwrap();
                 let readiness = event.readiness();
@@ -337,6 +364,22 @@ pub fn server_thread(init: Init) {
 
         // Drop disconnectors from the map
         clients.retain(|_, connection| connection.client.disconnected.is_none());
+
+        // Handle UDP writes
+        while udp_writeable {
+            if let Some((remote, packet)) = udp_out_queue.pop_front() {
+                match udp.send_to(&packet, &remote) {
+                    Ok(_) => {},
+                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        udp_writeable = false;
+                        break;
+                    }
+                    Err(e) => { println!("UDP out error: {:?}", e); continue },
+                }
+            } else {
+                break
+            }
+        }
     }
 }
 
