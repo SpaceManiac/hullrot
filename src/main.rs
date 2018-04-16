@@ -93,6 +93,10 @@ enum ControlIn {
         spoken: String,
     },
     SetGhost(String),
+    SetGhostEars {
+        who: String,
+        ears: i32,
+    },
     Linkage(HashMap<String, i32>),
 }
 
@@ -201,6 +205,9 @@ impl Server {
                     c.hot_freqs = once(DEADCHAT).collect();
                     c.hear_freqs = once(DEADCHAT).collect();
                 }),
+                ControlIn::SetGhostEars { who, ears } => with_client!(who; |c| {
+                    c.ghost_ears = ears != 0;
+                }),
             }
         }
     }
@@ -233,6 +240,7 @@ pub struct Client {
     mute: bool,  // mute (e.g. unconscious, muzzled, no tongue)
     deaf: bool,  // deaf (e.g. unconscious, flashbanged, genetic damage)
     self_deaf: bool,  // deafened in the Mumble client
+    ghost_ears: bool,  // whether all can be heard, only applies when z == 0
     current_language: String,
     known_languages: HashSet<String>,
     local_with: HashSet<String>,  // list of nearby usernames who hear us
@@ -268,6 +276,7 @@ impl Client {
             mute: false,
             deaf: false,
             self_deaf: false,
+            ghost_ears: false,
             current_language: GALCOM.to_owned(),
             known_languages: once(GALCOM.to_owned()).collect(),
             local_with: HashSet::new(),
@@ -468,6 +477,9 @@ impl Client {
                                     language: self.current_language.to_owned(),
                                 });
                             }
+                        }
+                        if other.ghost() && other.ghost_ears {
+                            heard = true;
                         }
                         if heard && (other.known_languages.contains(&self.current_language) || other.ghost()) {
                             other.sender.send_voice(self.session, seq, audio.to_owned());
