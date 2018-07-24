@@ -35,6 +35,7 @@ macro_rules! packet {
 }
 
 pub mod net;
+mod deser;
 
 use std::collections::{VecDeque, HashMap, HashSet};
 use std::time::{Instant, Duration};
@@ -49,20 +50,25 @@ pub fn main() {
 // ----------------------------------------------------------------------------
 // Control procotol
 
-type Freq = u16;
-type Z = i32;
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Serialize)]
+struct Freq(u16);
 
-const DEADCHAT: Freq = 1;
+type Z = i32;
+type ZGroup = i32;
+
+const DEADCHAT: Freq = Freq(1);
 const GALCOM: &str = "/datum/language/common";
 
 #[derive(Deserialize, Debug, Clone)]
 enum ControlIn {
     Debug(String),
-    Playing(i32),
+    Playing(#[serde(deserialize_with="deser::as_bool")] bool),
     SetMobFlags {
         who: String,
-        speak: i32,
-        hear: i32,
+        #[serde(deserialize_with="deser::as_bool")]
+        speak: bool,
+        #[serde(deserialize_with="deser::as_bool")]
+        hear: bool,
     },
     SetPTT {
         who: String,
@@ -82,6 +88,7 @@ enum ControlIn {
     },
     SetZ {
         who: String,
+        #[serde(deserialize_with="deser::as_int")]
         z: Z,
     },
     SetLanguages {
@@ -95,9 +102,10 @@ enum ControlIn {
     SetGhost(String),
     SetGhostEars {
         who: String,
-        ears: i32,
+        #[serde(deserialize_with="deser::as_bool")]
+        ears: bool,
     },
-    Linkage(HashMap<String, i32>),
+    Linkage(HashMap<String, ZGroup>),
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
@@ -136,7 +144,7 @@ pub struct Server {
     write_queue: VecDeque<ControlOut>,
     // state
     playing: bool,
-    linkage: HashMap<Z, i32>,
+    linkage: HashMap<Z, ZGroup>,
     dedup: HashMap<ControlOut, Instant>,
 }
 
@@ -179,13 +187,13 @@ impl Server {
         while let Some(control_in) = self.read_queue.pop_front() {
             match control_in {
                 ControlIn::Debug(msg) => println!("CONTROL dbg: {}", msg),
-                ControlIn::Playing(playing) => self.playing = playing != 0,
+                ControlIn::Playing(playing) => self.playing = playing,
                 ControlIn::Linkage(map) => {
                     self.linkage = map.into_iter().map(|(k, v)| (k.parse().unwrap(), v)).collect();
                 },
                 ControlIn::SetMobFlags { who, speak, hear } => with_client!(who; |c| {
-                    c.mute = speak == 0;
-                    c.deaf = hear == 0;
+                    c.mute = !speak;
+                    c.deaf = !hear;
                 }),
                 ControlIn::SetPTT { who, freq } => with_client!(who; |c| c.push_to_talk = freq),
                 ControlIn::SetLocalWith { who, with } => with_client!(who; |c| c.local_with = with),
@@ -206,7 +214,7 @@ impl Server {
                     c.hear_freqs = once(DEADCHAT).collect();
                 }),
                 ControlIn::SetGhostEars { who, ears } => with_client!(who; |c| {
-                    c.ghost_ears = ears != 0;
+                    c.ghost_ears = ears;
                 }),
             }
         }
