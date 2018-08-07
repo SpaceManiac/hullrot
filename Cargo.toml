@@ -17,5 +17,5 @@ byteorder = "1.1.0"
 serde = "1.0.21"
 serde_derive = "1.0.21"
 serde_json = "1.0.6"
-opus = { git = "https://github.com/SpaceManiac/opus-rs" }
+opus = "0.2.1"
 mumble-protocol = { path = "src/protocol" }
