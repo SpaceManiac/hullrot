@@ -18,7 +18,13 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 // https://github.com/Facepunch/garrysmod-issues/issues/3403
 
 use std::fmt;
+use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::hash::Hash;
+use std::cmp::Eq;
+
 use serde::*;
+
 use Freq;
 
 /// Deserialize 1 or 0 as true or false.
@@ -100,4 +106,40 @@ impl<'de> Deserialize<'de> for Freq {
         }
         de.deserialize_any(NumVisitor).map(Freq)
     }
+}
+
+/// Deserialize the empty sequence `[]` as the empty map `{}`.
+pub fn as_map<'de, D, K, V>(de: D) -> Result<HashMap<K, V>, D::Error> where
+    D: Deserializer<'de>,
+    K: Deserialize<'de> + Hash + Eq,
+    V: Deserialize<'de>,
+{
+    struct MapVisitor<K, V>(PhantomData<(K, V)>);
+    impl<'de, K, V> de::Visitor<'de> for MapVisitor<K, V> where
+        K: Deserialize<'de> + Hash + Eq,
+        V: Deserialize<'de>,
+    {
+        type Value = HashMap<K, V>;
+
+        fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+            fmt.write_str("map or empty sequence")
+        }
+
+        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            use serde::de::Error;
+            match seq.next_element()? {
+                Some(()) => Err(Error::invalid_length(1, &"empty sequence")),
+                None => Ok(Default::default()),
+            }
+        }
+
+        fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut values = HashMap::with_capacity(map.size_hint().unwrap_or(0));
+            while let Some((key, value)) = map.next_entry()? {
+                values.insert(key, value);
+            }
+            Ok(values)
+        }
+    }
+    de.deserialize_any(MapVisitor(PhantomData))
 }

@@ -105,7 +105,7 @@ enum ControlIn {
         #[serde(deserialize_with="deser::as_bool")]
         ears: bool,
     },
-    Linkage(HashMap<String, ZGroup>),
+    Linkage(#[serde(deserialize_with="deser::as_map")] HashMap<String, ZGroup>),
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
