@@ -22,6 +22,7 @@ extern crate mumble_protocol;
 extern crate opus;
 extern crate serde;
 extern crate serde_json;
+extern crate toml;
 #[macro_use] extern crate serde_derive;
 
 extern crate hullrot;
@@ -36,6 +37,7 @@ macro_rules! packet {
 
 pub mod net;
 mod deser;
+mod config;
 
 use std::collections::{VecDeque, HashMap, HashSet};
 use std::time::{Instant, Duration};
@@ -43,8 +45,16 @@ use std::borrow::Cow;
 use std::iter::once;
 
 pub fn main() {
+    if let Err(e) = run() {
+        println!("\n{e:?}\n\nAn error occurred:\n{e}", e=e);
+    }
+}
+
+pub fn run() -> Result<(), Box<std::error::Error>> {
     println!("Running in {}", std::env::current_dir().unwrap().display());
-    net::server_thread(net::init_server().unwrap());
+    let config = config::load_config("hullrot.toml".as_ref())?;
+    net::server_thread(net::init_server(&config)?);
+    Ok(())
 }
 
 // ----------------------------------------------------------------------------

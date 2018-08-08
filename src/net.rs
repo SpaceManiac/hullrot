@@ -50,30 +50,31 @@ pub struct Init {
     udp: UdpSocket,
 }
 
-pub fn init_server() -> Result<Init, Box<::std::error::Error>> {
+pub fn init_server(config: &::config::Config) -> Result<Init, Box<::std::error::Error>> {
     // TODO: audit
     let mut ctx = SslContext::builder(SslMethod::tls())?;
     ctx.set_cipher_list("ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:\
         ECDHE-ECDSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-SHA:\
         DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA")?;
     ctx.set_verify(SSL_VERIFY_NONE);
-    println!("Loading data/hullrot/cert.pem");
-    ctx.set_certificate_file("data/hullrot/cert.pem", x509::X509_FILETYPE_PEM)?;
-    println!("Loading data/hullrot/key.pem");
-    ctx.set_private_key_file("data/hullrot/key.pem", x509::X509_FILETYPE_PEM)?;
+    println!("Loading {}", config.cert_pem);
+    ctx.set_certificate_file(&config.cert_pem, x509::X509_FILETYPE_PEM)?;
+    println!("Loading {}", config.key_pem);
+    ctx.set_private_key_file(&config.key_pem, x509::X509_FILETYPE_PEM)?;
     ctx.check_private_key()?;
     let ctx = ctx.build();
 
     let poll = Poll::new()?;
-    let addr = "0.0.0.0:64738".parse()?;
+    let addr = config.mumble_addr.parse()?;
     println!("Binding tcp/{}", addr);
     let server = TcpListener::bind(&addr)?;
     poll.register(&server, TCP_SERVER, Ready::readable(), PollOpt::edge())?;
 
+    println!("Binding udp/{}", addr);
     let udp = UdpSocket::bind(&addr).unwrap();
     poll.register(&udp, UDP_SOCKET, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
 
-    let addr = "127.0.0.1:10961".parse()?;  // accept local control connections only
+    let addr = config.control_addr.parse()?;
     println!("Binding tcp/{}", addr);
     let control_server = TcpListener::bind(&addr)?;
     poll.register(&control_server, CONTROL_SERVER, Ready::readable(), PollOpt::edge())?;
