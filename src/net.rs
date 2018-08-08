@@ -26,7 +26,6 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use mio::*;
 use mio::net::*;
 use openssl::ssl::*;
-use openssl::x509;
 use opus::{Channels, Application, Bitrate, Decoder, Encoder};
 
 use mumble_protocol::Packet;
@@ -56,11 +55,11 @@ pub fn init_server(config: &::config::Config) -> Result<Init, Box<::std::error::
     ctx.set_cipher_list("ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:\
         ECDHE-ECDSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-SHA:\
         DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA")?;
-    ctx.set_verify(SSL_VERIFY_NONE);
+    ctx.set_verify(SslVerifyMode::NONE);
     println!("Loading {}", config.cert_pem);
-    ctx.set_certificate_file(&config.cert_pem, x509::X509_FILETYPE_PEM)?;
+    ctx.set_certificate_file(&config.cert_pem, SslFiletype::PEM)?;
     println!("Loading {}", config.key_pem);
-    ctx.set_private_key_file(&config.key_pem, x509::X509_FILETYPE_PEM)?;
+    ctx.set_private_key_file(&config.key_pem, SslFiletype::PEM)?;
     ctx.check_private_key()?;
     let ctx = ctx.build();
 
@@ -444,7 +443,7 @@ impl Stream {
                 println!("Failure: {:?}", mid);
                 Stream::Invalid
             }
-            Err(HandshakeError::Interrupted(mid)) => Stream::Handshaking(mid),
+            Err(HandshakeError::WouldBlock(mid)) => Stream::Handshaking(mid),
         }
     }
 
