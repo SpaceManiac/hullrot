@@ -23,7 +23,7 @@ fn main() {
     if let Err(e) = protoc_rust::run(protoc_rust::Args {
         input: &["Mumble.proto"],
         out_dir: &out_dir,
-        includes: &[],
+        .. Default::default()
     }) {
         eprintln!("Failed to run the protobuf code generator.");
         eprintln!("Ensure that `protoc` is available and on the PATH.");

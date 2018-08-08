@@ -6,9 +6,9 @@ version = "0.0.0"
 path = "lib.rs"
 
 [dependencies]
-protobuf = "1.4.2"
+protobuf = "2.0.4"
 byteorder = "1.1.0"
 bitflags = "1.0.1"
 
 [build-dependencies]
-protoc-rust = "1.4.2"
+protoc-rust = "2.0.4"
