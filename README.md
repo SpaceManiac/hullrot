@@ -86,6 +86,19 @@ suitable for BYOND integration.
 
 ## Hosting
 
+The Hullrot binary is a standalone Mumble server. It expects to be reachable by
+players on both TCP and UDP. It also exposes a control channel using a simple
+JSON-based RPC. By default, the control channel is only accessible by clients
+on the same host.
+
+Running Hullrot for the first time will create a config file `hullrot.toml` as
+well as a self-signed certificate. Use `hullrot.toml` to configure the servers,
+and use a CA such as [Let's Encrypt](https://letsencrypt.org/) if self-signed
+certificates are insufficient.
+
+Passing the name of a config file as a command-line argument will cause Hullrot
+to use that config file instead.
+
 ### Space Station 13
 
 Hullrot's DM code will need to be integrated into your codebase. The primary
@@ -106,15 +119,39 @@ DM code will need to be changed to `"libhullrot.so"`.
 ### Other Games
 
 Games with a similar foreign function interface to BYOND may choose to re-use
-the Hullrot library. Otherwise they may use their own socket facilities.
+the Hullrot library. All functions in the library follow the signature
+`extern "C" const char* hullrot_foo(int argc, const char** argv)` and return
+responses as a JSON blob. On failure, the blob will be an object with one key,
+`"error"`.
 
-The control channel is a simple TCP socket.
-Messages are framed by unsigned big-endian 32-bit integer length prefixes, and
-are encoded as JSON blobs.
+* `hullrot_dll_version` - returns the version of the control client library.
+  * `{"version": "0.1.0", "major": 0, "minor": 1, "patch": 0}`
+  * Clients should check that `major` is exactly the value they expect, and
+    that `minor` is at least the value they expect.
+  * Ignores its arguments.
+* `hullrot_init` - initializes the control connection and returns the first
+  control message received from the server.
+  * Errors if the control connection could not be made.
+    * `{"error": "The connection was refused."}`
+  * On success, the first control message should be a `Version`:
+    * `{"Version": {"version": "0.1.0", "major": 0, "minor": 1, "patch": 0}}`
+  * Clients may check that `major` is exactly the value they expect, and that
+    `minor` is at least the value they expect.
+  * Ignores its arguments.
+* `hullrot_control` - sends each of its arguments (which should be JSON blobs)
+  as control messages to the server.
+  * Returns a JSON list of control messages received from the server.
+  * May be called with no arguments to poll for incoming control messages.
+* `hullrot_stop` - disconnect from the server, blocking until completion.
+  * Ignores its arguments and returns the empty object `{}`.
 
-See the definition of `enum ControlIn` and `enum ControlOut` in `src/main.rs`
-for details on the messages supported, and the `integrations/` directory for
-examples.
+Games may also use their own socket facilities. The control channel is a simple
+TCP connection. Messages are framed by unsigned big-endian 32-bit integer
+length prefixes, and are encoded as JSON blobs.
+
+See the definitions of `enum ControlIn` and `enum ControlOut` in `src/main.rs`
+for details on the control messages, and the `integrations/` directory for
+example clients.
 
 <!---->
 
