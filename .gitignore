@@ -1,5 +1,6 @@
 /target/
-/data/
-/hullrot.toml
 **/*.rs.bk
-Cargo.lock
+
+/hullrot.toml
+/*.pem
+/data/
