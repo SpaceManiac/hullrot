@@ -44,7 +44,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             cert_pem: "cert.pem".to_owned(),
-            key_pem: "key.perm".to_owned(),
+            key_pem: "key.pem".to_owned(),
             mumble_addr: "0.0.0.0:64738".to_owned(),
             control_addr: "127.0.0.1:10961".to_owned(),
         }
