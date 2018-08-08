@@ -2,6 +2,7 @@
 name = "hullrot"
 version = "0.1.0"
 authors = ["Tad Hardesty <tad@platymuus.com>"]
+description = "Immersive roleplaying Mumble server"
 
 [lib]
 crate-type = ["rlib", "cdylib"]

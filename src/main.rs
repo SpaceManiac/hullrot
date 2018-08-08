@@ -46,15 +46,60 @@ use std::iter::once;
 
 pub fn main() {
     if let Err(e) = run() {
-        println!("\n{e:?}\n\nAn error occurred:\n{e}", e=e);
+        println!("\n{}\n", e);
+        std::process::exit(1);
     }
 }
 
 pub fn run() -> Result<(), Box<std::error::Error>> {
+    let config_path_owned;
+    let mut config_path = std::path::Path::new("hullrot.toml");
+    let mut config_default = true;
+
+    for arg in std::env::args().skip(1) {
+        if arg == "-h" || arg == "--help" || arg == "-V" || arg == "--version" {
+            return Ok(usage());
+        } else if arg == "--license-mumble" {
+            return Ok(mumble_license());
+        }
+        config_path_owned = std::path::PathBuf::from(arg);
+        config_path = &config_path_owned;
+        config_default = false;
+        break;
+    }
+
     println!("Running in {}", std::env::current_dir().unwrap().display());
-    let config = config::Config::load("hullrot.toml".as_ref(), true)?;
+    let config = config::Config::load(config_path, config_default)?;
     net::server_thread(net::init_server(&config)?);
     Ok(())
+}
+
+fn usage() {
+    println!("{} v{} - {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_DESCRIPTION"));
+    println!("Copyright (C) 2017-2018  {}", env!("CARGO_PKG_AUTHORS"));
+    println!("
+usage: hullrot [<config-file>]
+    -h, --help, -V, --version
+        show this help
+    --license-mumble
+        show the license for the Mumble protocol definitions
+
+Hullrot is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+Hullrot is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.");
+}
+
+fn mumble_license() {
+    print!("{}", include_str!("protocol/Mumble.proto.LICENSE"));
 }
 
 // ----------------------------------------------------------------------------
