@@ -17,12 +17,12 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::path::Path;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 
 use toml;
 
 /// Configuration details for the Hullrot server.
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// The path at which the OpenSSL `cert.pem` file may be found.
@@ -51,24 +51,40 @@ impl Default for Config {
     }
 }
 
-/// Wrapper used to put the whole config inside `[hullrot]`.
+impl Config {
+    /// Load the config from a file.
+    pub fn load(path: &Path, default: bool) -> Result<Config, Box<::std::error::Error>> {
+        println!("Loading {}", path.display());
+        let mut buf = Vec::new();
+        match File::open(path) {
+            Ok(mut file) => { file.read_to_end(&mut buf)?; },
+            Err(ref err) if default && err.kind() == io::ErrorKind::NotFound => {
+                println!("Not found, using defaults");
+                let cfg = Config::default();
+                let _ = cfg.save(path);
+                return Ok(cfg);
+            },
+            Err(err) => return Err(err.into()),
+        }
+        let root: DeRoot = toml::de::from_slice(&buf)?;
+        Ok(root.hullrot)
+    }
+
+    /// Save the config to a file.
+    fn save(&self, path: &Path) -> Result<(), Box<::std::error::Error>> {
+        let mut file = File::create(path)?;
+        file.write_all(&toml::ser::to_vec(&SerRoot { hullrot: self })?)?;
+        Ok(())
+    }
+}
+
+// Wrappers used to put the whole config inside `[hullrot]`.
 #[derive(Deserialize)]
-struct ConfigRoot {
+struct DeRoot {
     hullrot: Config,
 }
 
-/// Load the config from a file.
-pub fn load_config(path: &Path) -> Result<Config, Box<::std::error::Error>> {
-    println!("Loading {}", path.display());
-    let mut buf = Vec::new();
-    match File::open(path) {
-        Ok(mut file) => { file.read_to_end(&mut buf)?; },
-        Err(ref err) if err.kind() == io::ErrorKind::NotFound => {
-            println!("Not found, using defaults");
-            return Ok(Config::default())
-        },
-        Err(err) => return Err(err.into()),
-    }
-    let root: ConfigRoot = toml::de::from_slice(&buf)?;
-    Ok(root.hullrot)
+#[derive(Serialize)]
+struct SerRoot<'a> {
+    hullrot: &'a Config,
 }

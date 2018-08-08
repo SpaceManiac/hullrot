@@ -52,7 +52,7 @@ pub fn main() {
 
 pub fn run() -> Result<(), Box<std::error::Error>> {
     println!("Running in {}", std::env::current_dir().unwrap().display());
-    let config = config::load_config("hullrot.toml".as_ref())?;
+    let config = config::Config::load("hullrot.toml".as_ref(), true)?;
     net::server_thread(net::init_server(&config)?);
     Ok(())
 }
