@@ -44,6 +44,8 @@ use std::time::{Instant, Duration};
 use std::borrow::Cow;
 use std::iter::once;
 
+use config::Config;
+
 pub fn main() {
     if let Err(e) = run() {
         println!("\n{}\n", e);
@@ -69,8 +71,8 @@ pub fn run() -> Result<(), Box<std::error::Error>> {
     }
 
     println!("Running in {}", std::env::current_dir().unwrap().display());
-    let config = config::Config::load(config_path, config_default)?;
-    net::server_thread(net::init_server(&config)?);
+    let config = Config::load(config_path, config_default)?;
+    net::server_thread(net::init_server(&config)?, &config);
     Ok(())
 }
 
@@ -193,7 +195,9 @@ enum ControlOut {
 // ----------------------------------------------------------------------------
 // Mumble server
 
-pub struct Server {
+pub struct Server<'cfg> {
+    #[allow(dead_code)]
+    config: &'cfg Config,
     // used by networking
     read_queue: VecDeque<ControlIn>,
     write_queue: VecDeque<ControlOut>,
@@ -203,9 +207,10 @@ pub struct Server {
     dedup: HashMap<ControlOut, Instant>,
 }
 
-impl Server {
-    fn new() -> Server {
+impl<'cfg> Server<'cfg> {
+    fn new(config: &'cfg Config) -> Server<'cfg> {
         Server {
+            config,
             read_queue: VecDeque::new(),
             write_queue: VecDeque::new(),
             playing: false,
@@ -286,7 +291,8 @@ impl Server {
 }
 
 #[derive(Debug)]
-pub struct Client {
+pub struct Client<'cfg> {
+    config: &'cfg Config,
     // used by networking
     sender: net::PacketChannel,
     remote: std::net::SocketAddr,
@@ -312,8 +318,8 @@ pub struct Client {
     hear_freqs: HashSet<Freq>,  // heard radio channels, e.g. 1459 for common
 }
 
-impl Client {
-    fn new(remote: std::net::SocketAddr, sender: net::PacketChannel, session: u32) -> Client {
+impl<'cfg> Client<'cfg> {
+    fn new(config: &'cfg Config, remote: std::net::SocketAddr, sender: net::PacketChannel, session: u32) -> Client {
         sender.send(packet! { Version;
             set_version: 0x10300,
             set_release: concat!("Hullrot v", env!("CARGO_PKG_VERSION")).to_owned(),
@@ -324,6 +330,7 @@ impl Client {
         let admin = net::is_loopback(&remote);
 
         Client {
+            config,
             remote,
             session,
             admin,
@@ -435,7 +442,7 @@ impl Client {
                     });
                     self.sender.send(packet! { ChannelState;
                         set_channel_id: 0,
-                        set_name: "Hullrot".into(),
+                        set_name: self.config.server_name.to_owned(),
                         set_position: 0,
                         set_max_users: 0,
                     });
@@ -589,7 +596,7 @@ impl Client {
     }
 }
 
-impl std::fmt::Display for Client {
+impl<'cfg> std::fmt::Display for Client<'cfg> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         if let Some(ref name) = self.username {
             write!(fmt, "{} ({}/{})", name, self.session, self.remote)

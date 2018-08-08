@@ -31,6 +31,7 @@ use opus::{Channels, Application, Bitrate, Decoder, Encoder};
 
 use mumble_protocol::Packet;
 use hullrot::util::*;
+use config::Config;
 use {Client, Server, ControlIn};
 
 // ----------------------------------------------------------------------------
@@ -50,7 +51,7 @@ pub struct Init {
     udp: UdpSocket,
 }
 
-pub fn init_server(config: &::config::Config) -> Result<Init, Box<::std::error::Error>> {
+pub fn init_server(config: &Config) -> Result<Init, Box<::std::error::Error>> {
     // TODO: audit
     let mut ctx = SslContext::builder(SslMethod::tls())?;
     ctx.set_cipher_list("ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:\
@@ -143,7 +144,7 @@ fn create_self_signed_cert(cert_pem: &str, key_pem: &str) -> Result<(), Box<::st
     Ok(())
 }
 
-pub fn server_thread(init: Init) {
+pub fn server_thread(init: Init, config: &Config) {
     let Init { ctx, poll, server, control_server, udp } = init;
     let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit
     let mut udp_writeable = true;
@@ -153,7 +154,7 @@ pub fn server_thread(init: Init) {
     let mut events = Events::with_capacity(1024);
     let mut next_token: u32 = FIRST_TOKEN;
 
-    let mut control = Server::new();
+    let mut control = Server::new(config);
     let mut control_client: Option<ControlConnection> = None;
 
     println!("Started");
@@ -180,7 +181,7 @@ pub fn server_thread(init: Init) {
 
                     let ssl = Ssl::new(&ctx).unwrap();
                     let stream = Stream::new(ssl.accept(stream));
-                    clients.insert(token, Connection::new(session, remote, stream));
+                    clients.insert(token, Connection::new(config, session, remote, stream));
                 }
             } else if event.token() == CONTROL_SERVER {
                 loop {
@@ -529,18 +530,18 @@ impl Stream {
     }
 }
 
-struct Connection {
+struct Connection<'cfg> {
     stream: Stream,
     read_buf: BufReader,
     write_buf: BufWriter,
     write_rx: mpsc::Receiver<Command>,
-    client: Client,
+    client: Client<'cfg>,
     decoder: Decoder,
     encoders: HashMap<u32, Encoder>,
 }
 
-impl Connection {
-    fn new(session: u32, remote: SocketAddr, stream: Stream) -> Connection {
+impl<'cfg> Connection<'cfg> {
+    fn new(config: &'cfg Config, session: u32, remote: SocketAddr, stream: Stream) -> Connection {
         let (tx, rx) = mpsc::channel();
         let decoder = Decoder::new(SAMPLE_RATE, CHANNELS).unwrap();
         Connection {
@@ -550,7 +551,7 @@ impl Connection {
             read_buf: BufReader::new(),
             write_buf: BufWriter::new(),
             write_rx: rx,
-            client: Client::new(remote, PacketChannel(tx), session),
+            client: Client::new(config, remote, PacketChannel(tx), session),
         }
     }
 }
@@ -564,9 +565,9 @@ fn io_error(c: &mut Client, e: io::Error) {
     }
 }
 
-pub struct Everyone<'a, 'b: 'a>(&'a mut [&'b mut Connection], &'a mut [&'b mut Connection]);
+pub struct Everyone<'a, 'b: 'a, 'cfg: 'b>(&'a mut [&'b mut Connection<'cfg>], &'a mut [&'b mut Connection<'cfg>]);
 
-impl<'a, 'b> Everyone<'a, 'b> {
+impl<'a, 'b, 'cfg> Everyone<'a, 'b, 'cfg> {
     pub fn for_each<F: FnMut(&mut Client)>(&mut self, mut f: F) {
         for each in self.0.iter_mut() {
             f(&mut each.client);

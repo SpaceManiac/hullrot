@@ -22,14 +22,11 @@ use std::io::{self, Read, Write};
 use toml;
 
 /// Configuration details for the Hullrot server.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(default)]
 pub struct Config {
-    /// The path at which the OpenSSL `cert.pem` file may be found.
-    pub cert_pem: String,
-
-    /// The path at which the OpenSSL `key.pem` file may be found.
-    pub key_pem: String,
+    /// The name of the server's root channel.
+    pub server_name: String,
 
     /// The socket address which the Mumble server will host on.
     /// Defaults to all interfaces on the default Mumble port 64738.
@@ -38,15 +35,22 @@ pub struct Config {
     /// The socket address which the control interface will host on.
     /// Defaults to localhost only on the default Hullrot port 10961.
     pub control_addr: String,
+
+    /// The path at which the OpenSSL `cert.pem` file may be found.
+    pub cert_pem: String,
+
+    /// The path at which the OpenSSL `key.pem` file may be found.
+    pub key_pem: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            cert_pem: "cert.pem".to_owned(),
-            key_pem: "key.pem".to_owned(),
+            server_name: "Hullrot".to_owned(),
             mumble_addr: "0.0.0.0:64738".to_owned(),
             control_addr: "127.0.0.1:10961".to_owned(),
+            cert_pem: "cert.pem".to_owned(),
+            key_pem: "key.pem".to_owned(),
         }
     }
 }
