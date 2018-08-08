@@ -21,6 +21,7 @@ use std::net::SocketAddr;
 use std::sync::mpsc;
 use std::collections::{HashMap, VecDeque};
 use std::mem;
+use std::fs;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use mio::*;
@@ -56,6 +57,11 @@ pub fn init_server(config: &::config::Config) -> Result<Init, Box<::std::error::
         ECDHE-ECDSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-SHA:\
         DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA")?;
     ctx.set_verify(SslVerifyMode::NONE);
+
+    if fs::metadata(&config.cert_pem).is_err() && fs::metadata(&config.key_pem).is_err() {
+        create_self_signed_cert(&config.cert_pem, &config.key_pem)?;
+    }
+
     println!("Loading {}", config.cert_pem);
     ctx.set_certificate_file(&config.cert_pem, SslFiletype::PEM)?;
     println!("Loading {}", config.key_pem);
@@ -79,6 +85,62 @@ pub fn init_server(config: &::config::Config) -> Result<Init, Box<::std::error::
     poll.register(&control_server, CONTROL_SERVER, Ready::readable(), PollOpt::edge())?;
 
     Ok(Init { ctx, poll, server, control_server, udp })
+}
+
+#[deny(unused_must_use)]
+fn create_self_signed_cert(cert_pem: &str, key_pem: &str) -> Result<(), Box<::std::error::Error>> {
+    use openssl::x509::*;
+    use openssl::x509::extension::*;
+    use openssl::pkey::PKey;
+    use openssl::rsa::Rsa;
+    use openssl::bn::{BigNum, MsbOption};
+    use openssl::asn1::Asn1Time;
+    use openssl::hash::MessageDigest;
+
+    // openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365
+    println!("Creating default self-signed certificate");
+
+    // random private key
+    let privkey = PKey::from_rsa(Rsa::generate(4096)?)?;
+
+    let mut builder = X509::builder()?;
+    builder.set_version(2)?;
+    // random serial number
+    let serial_number = {
+        let mut serial = BigNum::new()?;
+        serial.rand(159, MsbOption::MAYBE_ZERO, false)?;
+        serial.to_asn1_integer()?
+    };
+    builder.set_serial_number(&serial_number)?;
+    // dummy subject name
+    let subject_name = {
+        let mut subject_name = X509NameBuilder::new()?;
+        subject_name.append_entry_by_text("C", "US")?;
+        subject_name.append_entry_by_text("ST", "CA")?;
+        subject_name.append_entry_by_text("O", "Hullrot server")?;
+        subject_name.append_entry_by_text("CN", "www.example.com")?;
+        subject_name.build()
+    };
+    builder.set_subject_name(&subject_name)?;
+    builder.set_pubkey(&privkey)?;
+
+    // valid for 365 days
+    let not_before = Asn1Time::days_from_now(0)?;
+    builder.set_not_before(&not_before)?;
+    let not_after = Asn1Time::days_from_now(365)?;
+    builder.set_not_after(&not_after)?;
+
+    builder.append_extension(BasicConstraints::new().build()?)?;
+
+    // self-signed
+    builder.sign(&privkey, MessageDigest::sha256())?;
+
+    // save to file
+    let cert = builder.build();
+    fs::File::create(cert_pem)?.write_all(&cert.to_pem()?)?;
+    fs::File::create(key_pem)?.write_all(&privkey.private_key_to_pem_pkcs8()?)?;
+
+    Ok(())
 }
 
 pub fn server_thread(init: Init) {
