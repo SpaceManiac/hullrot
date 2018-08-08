@@ -44,6 +44,8 @@ use std::time::{Instant, Duration};
 use std::borrow::Cow;
 use std::iter::once;
 
+use mumble_protocol::Permissions;
+
 use config::Config;
 
 pub fn main() {
@@ -379,7 +381,7 @@ impl<'cfg> Client<'cfg> {
     }
 
     fn tick(&mut self, server: &mut Server, mut others: net::Everyone) {
-        use mumble_protocol::{Packet, Permissions};
+        use mumble_protocol::Packet;
         use net::Command;
 
         while let Some(event) = self.events.pop_front() {
@@ -424,11 +426,7 @@ impl<'cfg> Client<'cfg> {
                     });
 
                     // Bring the client up to speed
-                    let mut permissions = Permissions::TRAVERSE | Permissions::SPEAK;
-                    if self.admin {
-                        permissions |= Permissions::KICK | Permissions::REGISTER | Permissions::REGISTER_SELF | Permissions::ENTER;
-                    }
-
+                    let permissions = self.permissions();
                     self.sender.send(packet! { CryptSetup;
                         set_key: vec![0; 16],
                         set_client_nonce: vec![0; 16],
@@ -482,8 +480,8 @@ impl<'cfg> Client<'cfg> {
                         set_message_length: 2000,
                         set_image_message_length: 131072,
                         set_max_users: 100,
-                        set_welcome_text: "Hullrot is <a href=\"https://github.com/SpaceManiac/hullrot/\">free software</a> \
-                            available under the GNU Affero General Public License.".to_owned(),
+                        set_welcome_text: r#"Hullrot is <a href="https://github.com/SpaceManiac/hullrot/">free software</a> \
+                            available under the GNU Affero General Public License."#.to_owned(),
                     });
                 },
                 Command::Packet(Packet::UserState(ref state)) => {
@@ -589,6 +587,14 @@ impl<'cfg> Client<'cfg> {
                 }
             }
         }
+    }
+
+    fn permissions(&self) -> Permissions {
+        let mut permissions = Permissions::TRAVERSE | Permissions::SPEAK;
+        if self.admin {
+            permissions |= Permissions::KICK | Permissions::REGISTER | Permissions::REGISTER_SELF | Permissions::ENTER;
+        }
+        permissions
     }
 
     fn ghost(&self) -> bool {
