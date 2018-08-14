@@ -41,6 +41,12 @@ pub struct Config {
 
     /// The path at which the OpenSSL `key.pem` file may be found.
     pub key_pem: String,
+
+    /// Whether authentication of ckeys with the game server is enabled.
+    ///
+    /// Causes the server to ask clients for certificates, match them to ckeys,
+    /// and prompt the player to verify with the server if no match was found.
+    pub authenticate: bool,
 }
 
 impl Default for Config {
@@ -51,6 +57,7 @@ impl Default for Config {
             control_addr: "127.0.0.1:10961".to_owned(),
             cert_pem: "cert.pem".to_owned(),
             key_pem: "key.pem".to_owned(),
+            authenticate: false,
         }
     }
 }

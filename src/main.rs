@@ -358,6 +358,9 @@ impl<'cfg> Client<'cfg> {
         }
     }
 
+    fn client_cert_hash(&mut self, hash: Option<String>) {
+    }
+
     fn kick<T: Into<Cow<'static, str>>>(&mut self, message: T) {
         if self.disconnected.is_none() {
             self.disconnected = Some(message.into());
@@ -480,7 +483,7 @@ impl<'cfg> Client<'cfg> {
                         set_message_length: 2000,
                         set_image_message_length: 131072,
                         set_max_users: 100,
-                        set_welcome_text: r#"Hullrot is <a href="https://github.com/SpaceManiac/hullrot/">free software</a> \
+                        set_welcome_text: r#"Hullrot is <a href="https://github.com/SpaceManiac/hullrot/">free software</a>
                             available under the GNU Affero General Public License."#.to_owned(),
                     });
                 },

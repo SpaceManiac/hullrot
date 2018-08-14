@@ -54,10 +54,13 @@ pub struct Init {
 pub fn init_server(config: &Config) -> Result<Init, Box<::std::error::Error>> {
     // TODO: audit
     let mut ctx = SslContext::builder(SslMethod::tls())?;
-    ctx.set_cipher_list("ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:\
-        ECDHE-ECDSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-SHA:\
-        DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA")?;
-    ctx.set_verify(SslVerifyMode::NONE);
+    ctx.set_cipher_list("EECDH+AESGCM:EDH+aRSA+AESGCM:DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA")?;
+    if config.authenticate {
+        ctx.set_verify_callback(SslVerifyMode::PEER, |_preverify_ok, _store_ctx| {
+            // Seems like a terrible idea, but apparently how Murmur behaves?
+            true
+        });
+    }
 
     if fs::metadata(&config.cert_pem).is_err() && fs::metadata(&config.key_pem).is_err() {
         create_self_signed_cert(&config.cert_pem, &config.key_pem)?;
@@ -271,6 +274,20 @@ pub fn server_thread(init: Init, config: &Config) {
                 }
                 if readiness.is_readable() {
                     if let Some(stream) = connection.stream.resolve() {
+                        if !connection.hash_delivered {
+                            connection.hash_delivered = true;
+                            let hash = stream.ssl().peer_certificate()
+                                .and_then(|cert| cert.digest(::openssl::hash::MessageDigest::sha256()).ok())
+                                .map(|digest| {
+                                    let mut buf = String::new();
+                                    for byte in digest.iter() {
+                                        use std::fmt::Write;
+                                        let _ = write!(buf, "{:02x}", byte);
+                                    }
+                                    buf
+                                });
+                            connection.client.client_cert_hash(hash);
+                        }
                         match read_packets(&mut connection.read_buf.with(stream), &mut connection.client, &mut connection.decoder) {
                             Ok(()) => {},
                             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
@@ -532,6 +549,7 @@ impl Stream {
 
 struct Connection<'cfg> {
     stream: Stream,
+    hash_delivered: bool,
     read_buf: BufReader,
     write_buf: BufWriter,
     write_rx: mpsc::Receiver<Command>,
@@ -546,6 +564,7 @@ impl<'cfg> Connection<'cfg> {
         let decoder = Decoder::new(SAMPLE_RATE, CHANNELS).unwrap();
         Connection {
             stream,
+            hash_delivered: false,
             decoder,
             encoders: HashMap::new(),
             read_buf: BufReader::new(),
