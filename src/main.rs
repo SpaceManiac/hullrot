@@ -314,12 +314,13 @@ pub struct Client<'cfg> {
     session: u32,
     auth_state: AuthState,
 
+    speaking: bool,  // whether our speech bubble is currently being shown
+    self_deaf: bool,  // deafened in the Mumble client
+
     // language and radio information
-    z: Z,  // the Z-level, for subspace comms
-    speaking: bool,
+    z: Z,  // the Z-level, for subspace comms - 0 is observer
     mute: bool,  // mute (e.g. unconscious, muzzled, no tongue)
     deaf: bool,  // deaf (e.g. unconscious, flashbanged, genetic damage)
-    self_deaf: bool,  // deafened in the Mumble client
     ghost_ears: bool,  // whether all can be heard, only applies when z == 0
     current_language: String,
     known_languages: HashSet<String>,
@@ -372,7 +373,8 @@ impl<'cfg> Client<'cfg> {
         }
     }
 
-    fn quit(&mut self, _server: &mut Server, mut others: net::Everyone) {
+    fn quit(&mut self, server: &mut Server, mut others: net::Everyone) {
+        self.unspeak(server);
         others.for_each(|other| { other.sender.send(packet! { UserRemove;
             set_session: self.session,
         }); });
@@ -589,6 +591,13 @@ impl<'cfg> Client<'cfg> {
         permissions
     }
 
+    fn update_permissions(&self) {
+        self.sender.send(packet! { PermissionQuery;
+            set_channel_id: 1,
+            set_permissions: self.permissions().bits(),
+        });
+    }
+
     fn ghost(&self) -> bool {
         self.z == 0
     }
@@ -688,6 +697,7 @@ impl<'cfg> Client<'cfg> {
             self.z = other.z;
             self.mute = other.mute;
             self.deaf = other.deaf;
+            self.ghost_ears = other.ghost_ears;
             self.current_language = replace(&mut other.current_language, Default::default());
             self.known_languages = replace(&mut other.known_languages, Default::default());
             self.local_with = replace(&mut other.local_with, Default::default());
