@@ -531,7 +531,7 @@ impl<'cfg> Client<'cfg> {
                     });
                 },
                 Command::Packet(_) => {},
-                Command::VoiceData { who: _, seq, audio, end } => {
+                Command::VoiceData { seq, audio, end } => {
                     if !server.playing {
                         // no server connection or pre/post-game
                         others.for_each(|other| {

@@ -374,7 +374,7 @@ pub fn server_thread(init: Init, config: &Config) {
                         break;
                     } else if let Ok(command) = connection.write_rx.try_recv() {
                         match command {
-                            Command::Packet(packet) => {
+                            OutCommand::Packet(packet) => {
                                 match packet {
                                     Packet::Ping(_) => {}
                                     _ => {} //println!("OUT: {:?}", packet)
@@ -388,7 +388,7 @@ pub fn server_thread(init: Init, config: &Config) {
                                     Err(e) => { io_error(&mut connection.client, e); break }
                                 }
                             }
-                            Command::VoiceData { who, seq, audio, end } => {
+                            OutCommand::VoiceData { who, seq, audio, end } => {
                                 // Encode the audio
                                 let len = connection.encoders.entry(who)
                                     .or_insert_with(|| {
@@ -479,11 +479,21 @@ const APPLICATION: Application = Application::Voip;
 const BITRATE: Bitrate = Bitrate::Bits(64_000);
 pub type Sample = i16;
 
-#[derive(Clone, Debug)]
-pub struct PacketChannel(mpsc::Sender<Command>);
-
 #[derive(Debug)]
 pub enum Command {
+    Packet(Packet),
+    VoiceData {
+        seq: i64,
+        audio: Vec<Sample>,
+        end: bool,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct PacketChannel(mpsc::Sender<OutCommand>);
+
+#[derive(Debug)]
+pub enum OutCommand {
     Packet(Packet),
     VoiceData {
         who: u32,
@@ -496,12 +506,12 @@ pub enum Command {
 impl PacketChannel {
     #[inline]
     pub fn send<T: Into<Packet>>(&self, message: T) -> bool {
-        self.0.send(Command::Packet(message.into())).is_ok()
+        self.0.send(OutCommand::Packet(message.into())).is_ok()
     }
 
     #[inline]
     pub fn send_voice(&self, who: u32, seq: i64, audio: Vec<Sample>) -> bool {
-        self.0.send(Command::VoiceData { who, seq, audio, end: false }).is_ok()
+        self.0.send(OutCommand::VoiceData { who, seq, audio, end: false }).is_ok()
     }
 }
 
@@ -552,7 +562,7 @@ struct Connection<'cfg> {
     hash_delivered: bool,
     read_buf: BufReader,
     write_buf: BufWriter,
-    write_rx: mpsc::Receiver<Command>,
+    write_rx: mpsc::Receiver<OutCommand>,
     client: Client<'cfg>,
     decoder: Decoder,
     encoders: HashMap<u32, Encoder>,
@@ -688,7 +698,6 @@ fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder) -> 
         );*/
 
     client.events.push_back(Command::VoiceData {
-        who: 0,
         seq: sequence_number,
         audio: output[..len].to_owned(),
         end: terminator,
