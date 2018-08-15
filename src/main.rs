@@ -125,8 +125,13 @@ const GALCOM: &str = "/datum/language/common";
 
 #[derive(Deserialize, Debug, Clone)]
 enum ControlIn {
+    /// Server will print the message to its logs.
     Debug(String),
+
+    /// Server will enable/disable location-based talk restrictions.
     Playing(#[serde(deserialize_with="deser::as_bool")] bool),
+
+    /// Server will update whether the ckey can speak/hear.
     SetMobFlags {
         who: String,
         #[serde(deserialize_with="deser::as_bool")]
@@ -134,44 +139,73 @@ enum ControlIn {
         #[serde(deserialize_with="deser::as_bool")]
         hear: bool,
     },
+
+    /// Server will update whether the ckey is holding push-to-talk on the
+    /// given frequency.
     SetPTT {
         who: String,
         freq: Option<Freq>,
     },
+
+    /// Server will update which other ckeys can hear `who` due to proximity.
     SetLocalWith {
         who: String,
         with: HashSet<String>,
     },
+
+    /// Server will update which frequencies the ckey can hear.
     SetHearFreqs {
         who: String,
         hear: HashSet<Freq>,
     },
+
+    /// Server will update which frequencies the ckey is always speaking on.
     SetHotFreqs {
         who: String,
         hot: HashSet<Freq>,
     },
+
+    /// Server will update which Z-level the given ckey is occupying.
     SetZ {
         who: String,
         #[serde(deserialize_with="deser::as_int")]
         z: Z,
     },
+
+    /// Server will update which languages the given ckey understands.
     SetLanguages {
         who: String,
         known: HashSet<String>,
     },
+
+    /// Server will set which language the given ckey is speaking in.
     SetSpokenLanguage {
         who: String,
         spoken: String,
     },
+
+    /// Server will set the given ckey to observer mode, able to understand
+    /// all languages and hear anything they are in range of.
     SetGhost(String),
+
+    /// Server will set whether the given ckey, when an observer, can hear
+    /// everything.
     SetGhostEars {
         who: String,
         #[serde(deserialize_with="deser::as_bool")]
         ears: bool,
     },
+
+    /// Server will update.
+    ///
+    /// Mapping should be from stringified Z-level to group number, e.g.
+    /// `{"2": 1, "5": 1}` to indicate Z-levels 2 and 5 are connected.
     Linkage(#[serde(deserialize_with="deser::as_map")] HashMap<String, ZGroup>),
 
-    /// Create association between specified cert_hash and ckey.
+    /// Server will create association between trusted ckey and user-provided
+    /// certificate hash.
+    ///
+    /// Requires that an unauthenticated client with that hash is connected.
     Register {
         cert_hash: String,
         ckey: String,
@@ -180,32 +214,51 @@ enum ControlIn {
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 enum ControlOut {
+    /// The server version. Always the first thing sent to a new control client.
     Version {
         version: &'static str,
         major: u32,
         minor: u32,
         patch: u32,
     },
+
+    /// The game should re-send all mob info for the given ckey.
     Refresh(String),
+
+    /// Game should show messages to each hearer indicating speaker has spoken.
     Hear {
         hearer: String,
         speaker: String,
         freq: Option<Freq>,
         language: String,
     },
+
+    /// Game should show message to speaker indicating they can or cannot hear
+    /// themselves speak.
     HearSelf {
         who: String,
         freq: Option<Freq>,
         language: String,
     },
+
+    /// Game should update speech bubble display such that only ckeys in `with`
+    /// can see the speech bubble belonging to `who`.
     SpeechBubble {
         who: String,
         with: Vec<String>,
     },
+
+    /// Game should show a message to the given ckey indicating they are mute.
     CannotSpeak(String),
+
+    /// Game may show a message to a player matching the given username,
+    /// prompting them to authenticate.
     NeedsRegistration {
         untrusted_username: String,
     },
+
+    /// Game should show a message to the given ckey indicating that their
+    /// registration attempt failed.
     BadRegistration {
         ckey: String,
     },
