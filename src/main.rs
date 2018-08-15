@@ -245,7 +245,7 @@ impl<'cfg> Server<'cfg> {
             ($name:expr; |$c:ident| $closure:expr) => {{
                 let ckey = ckey(&$name);
                 let mut once = Some(|$c: &mut Client| $closure);
-                _clients.for_each(|c| if c.ckey == ckey {
+                _clients.for_each(|c| if c.ckey() == Some(&ckey) {
                     if let Some(cl) = once.take() { cl(c); }
                 })
             }}
@@ -312,11 +312,9 @@ pub struct Client<'cfg> {
     // state
     admin: bool,
     session: u32,
-    username: Option<String>,
     auth_state: AuthState,
 
     // language and radio information
-    ckey: String,
     z: Z,  // the Z-level, for subspace comms
     speaking: bool,
     mute: bool,  // mute (e.g. unconscious, muzzled, no tongue)
@@ -351,12 +349,10 @@ impl<'cfg> Client<'cfg> {
             auth_state: AuthState::Initial,
 
             disconnected: None,
-            username: None,
             events: VecDeque::new(),
 
             z: 0,
             speaking: false,
-            ckey: String::new(),
             mute: false,
             deaf: false,
             self_deaf: false,
@@ -367,28 +363,6 @@ impl<'cfg> Client<'cfg> {
             push_to_talk: None,
             hot_freqs: HashSet::new(),
             hear_freqs: HashSet::new(),
-        }
-    }
-
-    fn client_cert_hash(&mut self, hash: Option<String>) {
-        // only do anything if authentication is enabled
-        let auth_db = if let Some(ref db) = self.config.auth_db {
-            db
-        } else {
-            return self.auth_disabled();
-        };
-
-        // if their client provided no cert, reject them
-        let hash = if let Some(hash) = hash {
-            hash
-        } else {
-            return self.kick("Authentication enabled: your Mumble client must provide a certificate");
-        };
-
-        if let Some(ckey) = auth_db.get(&hash) {
-            self.auth_ckey(ckey);
-        } else {
-            self.auth_cert_hash(hash);
         }
     }
 
@@ -407,10 +381,12 @@ impl<'cfg> Client<'cfg> {
     fn unspeak(&mut self, server: &mut Server) {
         if self.speaking {
             self.speaking = false;
-            server.write_queue.push_back(ControlOut::SpeechBubble {
-                who: self.ckey.to_owned(),
-                with: Vec::new(),
-            });
+            if let Some(ckey) = self.ckey() {
+                server.write_queue.push_back(ControlOut::SpeechBubble {
+                    who: ckey.to_owned(),
+                    with: Vec::new(),
+                });
+            }
         }
     }
 
@@ -420,46 +396,40 @@ impl<'cfg> Client<'cfg> {
 
         while let Some(event) = self.events.pop_front() {
             match event {
+                Command::CertHash(hash) => {
+                    // only do anything if authentication is enabled
+                    let auth_db = if let Some(ref db) = self.config.auth_db {
+                        db
+                    } else {
+                        self.auth_disabled();
+                        continue;
+                    };
+
+                    // if their client provided no cert, reject them
+                    let hash = if let Some(hash) = hash {
+                        hash
+                    } else {
+                        return self.kick("Authentication enabled: your Mumble client must provide a certificate");
+                    };
+
+                    if let Some(ckey) = auth_db.get(&hash) {
+                        self.auth_ckey(ckey, server, others.reborrow());
+                    } else {
+                        self.auth_cert_hash(hash);
+                    }
+                },
                 Command::Packet(Packet::Authenticate(auth)) => {
                     // Accept the username
                     let name = auth.get_username();
                     if !auth.has_username() || name.is_empty() {
                         return self.kick("No username");
                     }
-                    if self.username.is_some() {
-                        return self.kick("Double-login");
-                    }
                     if !auth.get_opus() {
                         return self.kick("No Opus support");
                     }
 
                     // Log in as a new user or stealthily replace the old one
-                    println!("{} logged in as {}", self, name);
-                    self.username = Some(name.to_owned());
-                    self.ckey = ckey(name);
-                    server.write_queue.push_back(ControlOut::Refresh(self.ckey.to_owned()));
-
-                    self.auth_username(name.to_owned());
-
-                    let mut found_previous = false;
-                    others.for_each(|other| {
-                        use std::mem::replace;
-                        if other.ckey != self.ckey { return }
-                        found_previous = true;
-                        println!("{} inherited from {}", self, other);
-                        other.kick("Logged in from another client");
-                        self.session = replace(&mut other.session, 0);
-
-                        self.z = other.z;
-                        self.mute = other.mute;
-                        self.deaf = other.deaf;
-                        self.current_language = replace(&mut other.current_language, Default::default());
-                        self.known_languages = replace(&mut other.known_languages, Default::default());
-                        self.local_with = replace(&mut other.local_with, Default::default());
-                        self.push_to_talk = replace(&mut other.push_to_talk, Default::default());
-                        self.hot_freqs = replace(&mut other.hot_freqs, Default::default());
-                        self.hear_freqs = replace(&mut other.hear_freqs, Default::default());
-                    });
+                    self.auth_username(name.to_owned(), server, others.reborrow());
 
                     // Bring the client up to speed
                     let permissions = self.permissions();
@@ -489,22 +459,6 @@ impl<'cfg> Client<'cfg> {
                         set_channel_id: 0,
                         set_name: name.to_owned(),
                         set_hash: "0000000000000000000000000000000000000000".into(),
-                    });
-                    others.for_each(|other| {
-                        if let Some(ref username) = other.username {
-                            other.sender.send(packet! { UserState;
-                                set_session: self.session,
-                                set_channel_id: 0,
-                                set_name: name.to_owned(),
-                                set_hash: "0000000000000000000000000000000000000000".into(),
-                            });
-                            self.sender.send(packet! { UserState;
-                                set_session: other.session,
-                                set_channel_id: 0,
-                                set_name: username.to_owned(),
-                                set_hash: "0000000000000000000000000000000000000000".into(),
-                            });
-                        }
                     });
                     self.sender.send(packet! { ServerSync;
                         set_session: self.session,
@@ -539,18 +493,21 @@ impl<'cfg> Client<'cfg> {
                             other.sender.send_voice(self.session, seq, audio.to_owned());
                         });
                         self.unspeak(server);
-                        continue
-                    } else if self.ckey.is_empty() {
-                        continue
-                    } else if self.mute {  // bodily mute
-                        server.write_with_cooldown(10_000, ControlOut::CannotSpeak(self.ckey.to_owned()));
+                        continue;
+                    }
+
+                    let ckey = if let Some(ckey) = self.ckey() { ckey.to_owned() } else { continue };
+
+                    if self.mute {  // bodily mute
+                        server.write_with_cooldown(10_000, ControlOut::CannotSpeak(ckey.to_owned()));
                         self.unspeak(server);
-                        continue
+                        continue;
                     }
 
                     // Transmit to anyone who can hear us
                     others.for_each(|other| {
-                        if other.self_deaf || other.deaf || other.ckey.is_empty() { return }
+                        if other.self_deaf || other.deaf { return }
+                        let other_ckey = if let Some(ckey) = other.ckey() { ckey } else { return };
 
                         let ptt_heard = match self.push_to_talk {
                             Some(freq) if other.hear_freqs.contains(&freq) => Some(freq),
@@ -561,11 +518,11 @@ impl<'cfg> Client<'cfg> {
                             .map_or(self.z == other.z, |(a, b)| a == b);
 
                         let mut heard = false;
-                        if self.local_with.contains(&other.ckey) {
+                        if self.local_with.contains(other_ckey) {
                             heard = true;
                             server.write_with_cooldown(10_000, ControlOut::Hear {
-                                hearer: other.ckey.to_owned(),
-                                speaker: self.ckey.to_owned(),
+                                hearer: other_ckey.to_owned(),
+                                speaker: ckey.to_owned(),
                                 freq: None,
                                 language: self.current_language.to_owned(),
                             });
@@ -574,8 +531,8 @@ impl<'cfg> Client<'cfg> {
                             for freq in self.hot_freqs.intersection(&other.hear_freqs).cloned().chain(ptt_heard) {
                                 heard = true;
                                 server.write_with_cooldown(10_000, ControlOut::Hear {
-                                    hearer: other.ckey.to_owned(),
-                                    speaker: self.ckey.to_owned(),
+                                    hearer: other_ckey.to_owned(),
+                                    speaker: ckey.to_owned(),
                                     freq: Some(freq),
                                     language: self.current_language.to_owned(),
                                 });
@@ -592,7 +549,7 @@ impl<'cfg> Client<'cfg> {
                     // Let us know if we cannot hear ourselves
                     if self.deaf {
                         server.write_with_cooldown(10_000, ControlOut::HearSelf {
-                            who: self.ckey.to_owned(),
+                            who: ckey.to_owned(),
                             freq: None,
                             language: self.current_language.to_owned(),
                         });
@@ -603,7 +560,7 @@ impl<'cfg> Client<'cfg> {
                     };
                     for freq in self.hot_freqs.intersection(&self.hear_freqs).cloned().chain(ptt_hear_self) {
                         server.write_with_cooldown(10_000, ControlOut::HearSelf {
-                            who: self.ckey.to_owned(),
+                            who: ckey.to_owned(),
                             freq: Some(freq),
                             language: self.current_language.to_owned(),
                         });
@@ -615,8 +572,8 @@ impl<'cfg> Client<'cfg> {
                     } else if !self.speaking {
                         self.speaking = true;
                         server.write_queue.push_back(ControlOut::SpeechBubble {
-                            who: self.ckey.to_owned(),
-                            with: self.local_with.iter().chain(once(&self.ckey)).cloned().collect(),
+                            who: ckey.to_owned(),
+                            with: self.local_with.iter().cloned().chain(once(ckey.to_owned())).collect(),
                         });
                     }
                 }
@@ -639,8 +596,8 @@ impl<'cfg> Client<'cfg> {
 
 impl<'cfg> std::fmt::Display for Client<'cfg> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if let Some(ref name) = self.username {
-            write!(fmt, "{} ({}/{})", name, self.session, self.remote)
+        if let AuthState::Active { ref username, .. } = self.auth_state {
+            write!(fmt, "{} ({}/{})", username, self.session, self.remote)
         } else {
             write!(fmt, "({}/{})", self.session, self.remote)
         }
@@ -697,32 +654,70 @@ impl<'cfg> Client<'cfg> {
         println!("{:?}", self.auth_state);
     }
 
-    fn auth_ckey(&mut self, ckey: String) {
+    fn auth_ckey(&mut self, ckey: String, server: &mut Server, others: net::Everyone) {
         self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
             AuthState::Initial => AuthState::CkeyKnown { ckey },
             AuthState::CertKnown { cert_hash: _ } => AuthState::CkeyKnown { ckey },
-            AuthState::UsernameKnown { cert_hash: _, username } => self.authenticated(ckey, username),
+            AuthState::UsernameKnown { cert_hash: _, username } => self.authenticated(ckey, username, server, others),
             _ => { self.kick("Authentication flow error"); AuthState::Errored }
         };
         println!("{:?}", self.auth_state);
     }
 
-    fn auth_username(&mut self, username: String) {
+    fn auth_username(&mut self, username: String, server: &mut Server, others: net::Everyone) {
         self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
             AuthState::UsernameKnown { cert_hash, username: _ } => AuthState::UsernameKnown { cert_hash, username },
             AuthState::CertKnown { cert_hash } => AuthState::UsernameKnown { cert_hash, username },
-            AuthState::CkeyKnown { ckey } => self.authenticated(ckey, username),
-            AuthState::AuthDisabled => self.authenticated(ckey(&username), username),
+            AuthState::CkeyKnown { ckey } => self.authenticated(ckey, username, server, others),
+            AuthState::AuthDisabled => self.authenticated(ckey(&username), username, server, others),
             _ => { self.kick("Authentication flow error"); AuthState::Errored }
         };
         println!("{:?}", self.auth_state);
     }
 
-    fn authenticated(&mut self, ckey: String, username: String) -> AuthState {
+    fn authenticated(&mut self, ckey: String, username: String, server: &mut Server, mut others: net::Everyone) -> AuthState {
+        println!("{} logged in as ckey:{} username:{}", self, ckey, username);
+        server.write_queue.push_back(ControlOut::Refresh(ckey.to_owned()));
+
+        others.for_each(|other| {
+            if other.ckey() != Some(&ckey[..]) { return }
+            println!("{} inherited from {}", self, other);
+            other.kick("Logged in from another client");
+            self.session = replace(&mut other.session, 0);
+
+            self.z = other.z;
+            self.mute = other.mute;
+            self.deaf = other.deaf;
+            self.current_language = replace(&mut other.current_language, Default::default());
+            self.known_languages = replace(&mut other.known_languages, Default::default());
+            self.local_with = replace(&mut other.local_with, Default::default());
+            self.push_to_talk = replace(&mut other.push_to_talk, Default::default());
+            self.hot_freqs = replace(&mut other.hot_freqs, Default::default());
+            self.hear_freqs = replace(&mut other.hear_freqs, Default::default());
+        });
+
+        others.for_each(|other| {
+            if let AuthState::Active { username: ref their_username, .. } = other.auth_state {
+                other.sender.send(packet! { UserState;
+                    set_session: self.session,
+                    set_channel_id: 0,
+                    set_name: username.to_owned(),
+                    set_hash: "0000000000000000000000000000000000000000".into(),
+                });
+                self.sender.send(packet! { UserState;
+                    set_session: other.session,
+                    set_channel_id: 0,
+                    set_name: their_username.to_owned(),
+                    set_hash: "0000000000000000000000000000000000000000".into(),
+                });
+            }
+        });
+        self.update_permissions();
+
         AuthState::Active { ckey, username }
     }
 
-    fn ckey_(&self) -> Option<&str> {
+    fn ckey(&self) -> Option<&str> {
         match self.auth_state {
             AuthState::Active { ref ckey, .. } => Some(ckey),
             _ => None,

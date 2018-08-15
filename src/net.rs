@@ -286,7 +286,7 @@ pub fn server_thread(init: Init, config: &Config) {
                                     }
                                     buf
                                 });
-                            connection.client.client_cert_hash(hash);
+                            connection.client.events.push_back(Command::CertHash(hash));
                         }
                         match read_packets(&mut connection.read_buf.with(stream), &mut connection.client, &mut connection.decoder) {
                             Ok(()) => {},
@@ -481,6 +481,7 @@ pub type Sample = i16;
 
 #[derive(Debug)]
 pub enum Command {
+    CertHash(Option<String>),
     Packet(Packet),
     VoiceData {
         seq: i64,
@@ -604,6 +605,10 @@ impl<'a, 'b, 'cfg> Everyone<'a, 'b, 'cfg> {
         for each in self.1.iter_mut() {
             f(&mut each.client);
         }
+    }
+
+    pub fn reborrow<'c>(&'c mut self) -> Everyone<'c, 'b, 'cfg> {
+        Everyone(self.0, self.1)
     }
 }
 
