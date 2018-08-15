@@ -48,24 +48,24 @@ The [Rust] compiler:
     rustup override add stable-i686-pc-windows-msvc
     ```
 
-OpenSSL:
+System packages (OpenSSL, Opus, Protobuf):
 
 * Ubuntu and Debian users run:
 
     ```sh
-    sudo apt-get install libssl-dev:i386 pkg-config:i386
+    sudo apt-get install libssl-dev:i386 libopus-dev:i386 protobuf-compiler pkg-config:i386
     ```
 
 * Windows (GNU/MSYS2) users run:
 
     ```sh
-    pacman -S mingw64-mingw-w64-i686-openssl
+    pacman -S mingw-w64-i686-{openssl,opus,protobuf}
     ```
 
-* Windows (MSVC) users select from [available binaries][openssl-bin].
+* Windows (MSVC) users select from [OpenSSL binaries][openssl-bin].
 
 * Other distributions install the appropriate **32-bit development** and
-  **32-bit runtime** packages.
+  **32-bit runtime** packages for OpenSSL, Opus, and the Protobuf compiler.
 
 Note: only the BYOND integration *requires* building in 32-bit mode, but the
 rest of this README will assume 32-bit for simplicity.
