@@ -62,7 +62,10 @@ System packages (OpenSSL, Opus, Protobuf):
     pacman -S mingw-w64-i686-{openssl,opus,protobuf}
     ```
 
-* Windows (MSVC) users select from [OpenSSL binaries][openssl-bin].
+* Windows (MSVC) users:
+  * Select from [OpenSSL binaries][openssl-bin].
+  * Select latest [protoc-win32.zip][protobuf-bin].
+  * Rust Opus package will automatically build from bundled sources.
 
 * Other distributions install the appropriate **32-bit development** and
   **32-bit runtime** packages for OpenSSL, Opus, and the Protobuf compiler.
@@ -161,6 +164,7 @@ example clients.
 [rustup]: https://rustup.rs/
 [msvc]: https://visualstudio.microsoft.com/thank-you-downloading-visual-studio/?sku=BuildTools&rel=15
 [openssl-bin]: https://wiki.openssl.org/index.php/Binaries
+[protobuf-bin]: https://github.com/google/protobuf/releases
 
 ## License
 
