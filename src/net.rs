@@ -55,7 +55,7 @@ pub fn init_server(config: &Config) -> Result<Init, Box<::std::error::Error>> {
     // TODO: audit
     let mut ctx = SslContext::builder(SslMethod::tls())?;
     ctx.set_cipher_list("EECDH+AESGCM:EDH+aRSA+AESGCM:DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA")?;
-    if config.authenticate {
+    if config.auth_db.is_some() {
         ctx.set_verify_callback(SslVerifyMode::PEER, |_preverify_ok, _store_ctx| {
             // Seems like a terrible idea, but apparently how Murmur behaves?
             true

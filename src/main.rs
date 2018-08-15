@@ -106,6 +106,10 @@ fn mumble_license() {
     print!("{}", include_str!("protocol/Mumble.proto.LICENSE"));
 }
 
+const WELCOME: &str = "\
+    Hullrot is <a href=\"https://github.com/SpaceManiac/hullrot/\">free software</a> \
+    available under the GNU Affero General Public License.";
+
 // ----------------------------------------------------------------------------
 // Control procotol
 
@@ -359,6 +363,13 @@ impl<'cfg> Client<'cfg> {
     }
 
     fn client_cert_hash(&mut self, hash: Option<String>) {
+        let auth_db = if let Some(ref db) = self.config.auth_db {
+            db
+        } else { return };
+        if let Some(hash) = hash {
+        } else {
+            self.kick("Authentication enabled: your Mumble client must provide a certificate");
+        }
     }
 
     fn kick<T: Into<Cow<'static, str>>>(&mut self, message: T) {
@@ -483,8 +494,7 @@ impl<'cfg> Client<'cfg> {
                         set_message_length: 2000,
                         set_image_message_length: 131072,
                         set_max_users: 100,
-                        set_welcome_text: r#"Hullrot is <a href="https://github.com/SpaceManiac/hullrot/">free software</a>
-                            available under the GNU Affero General Public License."#.to_owned(),
+                        set_welcome_text: WELCOME.to_owned(),
                     });
                 },
                 Command::Packet(Packet::UserState(ref state)) => {
