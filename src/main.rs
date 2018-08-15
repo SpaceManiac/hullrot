@@ -210,6 +210,12 @@ enum ControlIn {
         cert_hash: String,
         ckey: String,
     },
+
+    /// Server will send `IsConnected` indicating whether there is an authed
+    /// client with the given ckey.
+    CheckConnected {
+        ckey: String,
+    },
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
@@ -262,6 +268,12 @@ enum ControlOut {
     BadRegistration {
         ckey: String,
     },
+
+    /// Sent in response to `CheckConnected`.
+    IsConnected {
+        ckey: String,
+        connected: bool,
+    },
 }
 
 // ----------------------------------------------------------------------------
@@ -307,12 +319,16 @@ impl<'cfg> Server<'cfg> {
 
     fn tick(&mut self, mut _clients: net::Everyone) {
         macro_rules! with_client {
-            ($name:expr; |$c:ident| $closure:expr) => {{
+            ($name:expr; |$c:ident| $closure:expr $(; else $else_:block)*) => {{
                 let ckey = ckey(&$name);
-                let mut once = Some(|$c: &mut Client| $closure);
-                _clients.for_each(|c| if c.ckey() == Some(&ckey) {
-                    if let Some(cl) = once.take() { cl(c); }
-                })
+                let _else = {
+                    let mut once = Some(|$c: &mut Client| $closure);
+                    _clients.for_each(|c| if c.ckey() == Some(&ckey) {
+                        if let Some(mut _cl) = once.take() { _cl(c); }
+                    });
+                    once.is_some()
+                };
+                $(if _else $else_;)*
             }}
         }
 
@@ -370,6 +386,17 @@ impl<'cfg> Server<'cfg> {
                         }
                     }
                 },
+                ControlIn::CheckConnected { ckey } => with_client!(ckey; |_c| {
+                    self.write_queue.push_back(ControlOut::IsConnected {
+                        ckey: ckey.to_owned(),
+                        connected: true,
+                    });
+                }; else {
+                    self.write_queue.push_back(ControlOut::IsConnected {
+                        ckey: ckey,
+                        connected: false,
+                    });
+                }),
             }
         }
     }
@@ -462,9 +489,17 @@ impl<'cfg> Client<'cfg> {
 
     fn quit(&mut self, server: &mut Server, mut others: net::Everyone) {
         self.unspeak(server);
-        others.for_each(|other| { other.sender.send(packet! { UserRemove;
-            set_session: self.session,
-        }); });
+        others.for_each(|other| {
+            other.sender.send(packet! { UserRemove;
+                set_session: self.session,
+            });
+        });
+        if let Some(ckey) = self.ckey() {
+            server.write_queue.push_back(ControlOut::IsConnected {
+                ckey: ckey.to_owned(),
+                connected: false,
+            });
+        }
     }
 
     fn unspeak(&mut self, server: &mut Server) {
