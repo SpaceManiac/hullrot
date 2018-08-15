@@ -216,6 +216,12 @@ enum ControlIn {
     CheckConnected {
         ckey: String,
     },
+
+    /// Server will set whether the given ckey has Mumble admin rights.
+    SetAdmin {
+        ckey: String,
+        is_admin: bool,
+    },
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
@@ -396,6 +402,10 @@ impl<'cfg> Server<'cfg> {
                         ckey: ckey,
                         connected: false,
                     });
+                }),
+                ControlIn::SetAdmin { ckey, is_admin } => with_client!(ckey; |c| {
+                    c.admin = is_admin;
+                    c.update_permissions();
                 }),
             }
         }
@@ -713,6 +723,7 @@ impl<'cfg> Client<'cfg> {
     fn permissions(&self) -> Permissions {
         let mut permissions = Permissions::TRAVERSE | Permissions::SPEAK;
         if self.admin {
+            // Note: most of these don't actually do anything.
             permissions |= Permissions::KICK | Permissions::REGISTER | Permissions::REGISTER_SELF | Permissions::ENTER;
         }
         permissions
