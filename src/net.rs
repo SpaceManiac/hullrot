@@ -277,7 +277,8 @@ pub fn server_thread(init: Init, config: &Config) {
                         if !connection.hash_delivered {
                             connection.hash_delivered = true;
                             let hash = stream.ssl().peer_certificate()
-                                .and_then(|cert| cert.digest(::openssl::hash::MessageDigest::sha256()).ok())
+                                // Murmur uses SHA-1 so we shall too
+                                .and_then(|cert| cert.digest(::openssl::hash::MessageDigest::sha1()).ok())
                                 .map(|digest| {
                                     let mut buf = String::new();
                                     for byte in digest.iter() {
@@ -481,6 +482,7 @@ pub type Sample = i16;
 
 #[derive(Debug)]
 pub enum Command {
+    AuthCkey(String),
     CertHash(Option<String>),
     Packet(Packet),
     VoiceData {

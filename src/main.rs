@@ -170,6 +170,12 @@ enum ControlIn {
         ears: bool,
     },
     Linkage(#[serde(deserialize_with="deser::as_map")] HashMap<String, ZGroup>),
+
+    /// Create association between specified cert_hash and ckey.
+    Register {
+        cert_hash: String,
+        ckey: String,
+    },
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
@@ -197,6 +203,12 @@ enum ControlOut {
         with: Vec<String>,
     },
     CannotSpeak(String),
+    NeedsRegistration {
+        untrusted_username: String,
+    },
+    BadRegistration {
+        ckey: String,
+    },
 }
 
 // ----------------------------------------------------------------------------
@@ -283,6 +295,28 @@ impl<'cfg> Server<'cfg> {
                 ControlIn::SetGhostEars { who, ears } => with_client!(who; |c| {
                     c.ghost_ears = ears;
                 }),
+                ControlIn::Register { cert_hash, ckey } => {
+                    if let Some(ref auth_db) = self.config.auth_db {
+                        let mut applied = false;
+                        _clients.for_each(|c| match c.auth_state {
+                            AuthState::CertKnown { cert_hash: ref theirs } |
+                            AuthState::UsernameKnown { cert_hash: ref theirs, .. } => {
+                                if !applied && cert_hash == *theirs {
+                                    c.events.push_back(net::Command::AuthCkey(ckey.to_owned()));
+                                    applied = true;
+                                }
+                            }
+                            _ => {}
+                        });
+                        if applied {
+                            auth_db.set(&cert_hash, &ckey);
+                        } else {
+                            self.write_queue.push_back(ControlOut::BadRegistration {
+                                ckey: ckey,
+                            });
+                        }
+                    }
+                },
             }
         }
     }
@@ -417,8 +451,12 @@ impl<'cfg> Client<'cfg> {
                     if let Some(ckey) = auth_db.get(&hash) {
                         self.auth_ckey(ckey, server, others.reborrow());
                     } else {
+                        println!("{} has unrecognized cert hash {:?}", self, hash);
                         self.auth_cert_hash(hash);
                     }
+                },
+                Command::AuthCkey(ckey) => {
+                    self.auth_ckey(ckey, server, others.reborrow());
                 },
                 Command::Packet(Packet::Authenticate(auth)) => {
                     // Accept the username
@@ -431,6 +469,7 @@ impl<'cfg> Client<'cfg> {
                     }
 
                     // Log in as a new user or stealthily replace the old one
+                    println!("{} provided username {}", self, name);
                     self.auth_username(name.to_owned(), server, others.reborrow());
 
                     // Bring the client up to speed
@@ -652,7 +691,6 @@ impl<'cfg> Client<'cfg> {
             AuthState::Initial => AuthState::AuthDisabled,
             _ => { self.kick("Authentication flow error"); AuthState::Errored }
         };
-        println!("{:?}", self.auth_state);
     }
 
     fn auth_cert_hash(&mut self, cert_hash: String) {
@@ -660,7 +698,6 @@ impl<'cfg> Client<'cfg> {
             AuthState::Initial => AuthState::CertKnown { cert_hash },
             _ => { self.kick("Authentication flow error"); AuthState::Errored }
         };
-        println!("{:?}", self.auth_state);
     }
 
     fn auth_ckey(&mut self, ckey: String, server: &mut Server, others: net::Everyone) {
@@ -670,22 +707,30 @@ impl<'cfg> Client<'cfg> {
             AuthState::UsernameKnown { cert_hash: _, username } => self.authenticated(ckey, username, server, others),
             _ => { self.kick("Authentication flow error"); AuthState::Errored }
         };
-        println!("{:?}", self.auth_state);
     }
 
     fn auth_username(&mut self, username: String, server: &mut Server, others: net::Everyone) {
+        // TODO: allow game to override player but not the other way around
         self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
             AuthState::UsernameKnown { cert_hash, username: _ } => AuthState::UsernameKnown { cert_hash, username },
-            AuthState::CertKnown { cert_hash } => AuthState::UsernameKnown { cert_hash, username },
+            AuthState::CertKnown { cert_hash } => {
+                server.write_queue.push_back(ControlOut::NeedsRegistration {
+                    untrusted_username: username.to_owned()
+                });
+                self.sender.send(packet! { TextMessage;
+                    set_message: format!("<b>Copy-paste this code in-game to authenticate</b>:<br>{}", cert_hash),
+                });
+                AuthState::UsernameKnown { cert_hash, username }
+            },
             AuthState::CkeyKnown { ckey } => self.authenticated(ckey, username, server, others),
             AuthState::AuthDisabled => self.authenticated(ckey(&username), username, server, others),
+            AuthState::Active { ckey, username: _ } => AuthState::Active { ckey, username },
             _ => { self.kick("Authentication flow error"); AuthState::Errored }
         };
-        println!("{:?}", self.auth_state);
     }
 
     fn authenticated(&mut self, ckey: String, username: String, server: &mut Server, mut others: net::Everyone) -> AuthState {
-        println!("{} logged in as ckey:{} username:{}", self, ckey, username);
+        println!("{} authenticated as {}", self, ckey);
         server.write_queue.push_back(ControlOut::Refresh(ckey.to_owned()));
 
         others.for_each(|other| {
