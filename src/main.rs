@@ -39,6 +39,7 @@ pub mod net;
 mod deser;
 mod config;
 
+use std::mem::replace;
 use std::collections::{VecDeque, HashMap, HashSet};
 use std::time::{Instant, Duration};
 use std::borrow::Cow;
@@ -296,6 +297,10 @@ impl<'cfg> Server<'cfg> {
     }
 }
 
+fn ckey(name: &str) -> String {
+    name.chars().filter(|c| c.is_ascii() && c.is_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect()
+}
+
 #[derive(Debug)]
 pub struct Client<'cfg> {
     config: &'cfg Config,
@@ -308,6 +313,8 @@ pub struct Client<'cfg> {
     admin: bool,
     session: u32,
     username: Option<String>,
+    auth_state: AuthState,
+
     // language and radio information
     ckey: String,
     z: Z,  // the Z-level, for subspace comms
@@ -341,6 +348,7 @@ impl<'cfg> Client<'cfg> {
             session,
             admin,
             sender,
+            auth_state: AuthState::Initial,
 
             disconnected: None,
             username: None,
@@ -363,12 +371,24 @@ impl<'cfg> Client<'cfg> {
     }
 
     fn client_cert_hash(&mut self, hash: Option<String>) {
+        // only do anything if authentication is enabled
         let auth_db = if let Some(ref db) = self.config.auth_db {
             db
-        } else { return };
-        if let Some(hash) = hash {
         } else {
-            self.kick("Authentication enabled: your Mumble client must provide a certificate");
+            return self.auth_disabled();
+        };
+
+        // if their client provided no cert, reject them
+        let hash = if let Some(hash) = hash {
+            hash
+        } else {
+            return self.kick("Authentication enabled: your Mumble client must provide a certificate");
+        };
+
+        if let Some(ckey) = auth_db.get(&hash) {
+            self.auth_ckey(ckey);
+        } else {
+            self.auth_cert_hash(hash);
         }
     }
 
@@ -418,6 +438,8 @@ impl<'cfg> Client<'cfg> {
                     self.username = Some(name.to_owned());
                     self.ckey = ckey(name);
                     server.write_queue.push_back(ControlOut::Refresh(self.ckey.to_owned()));
+
+                    self.auth_username(name.to_owned());
 
                     let mut found_previous = false;
                     others.for_each(|other| {
@@ -625,6 +647,85 @@ impl<'cfg> std::fmt::Display for Client<'cfg> {
     }
 }
 
-fn ckey(name: &str) -> String {
-    name.chars().filter(|c| c.is_ascii() && c.is_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect()
+// ----------------------------------------------------------------------------
+// Authentication flow
+
+// The certificate hash is always known before the Mumble Auth is received,
+// but the ckey might not be known by that time.
+
+#[derive(Debug)]
+enum AuthState {
+    // Just connected
+    Initial,
+    // AuthDB disabled
+    AuthDisabled,
+    // Cert hash is known, but user has no ckey
+    CertKnown {
+        cert_hash: String,
+    },
+    // Cert hash has been matched to ckey
+    CkeyKnown {
+        ckey: String,
+    },
+    // Preferred name and hash are known
+    UsernameKnown {
+        cert_hash: String,
+        username: String,
+    },
+    // Actively chatting
+    Active {
+        ckey: String,
+        username: String,
+    },
+    Errored,
+}
+
+impl<'cfg> Client<'cfg> {
+    fn auth_disabled(&mut self) {
+        self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
+            AuthState::Initial => AuthState::AuthDisabled,
+            _ => { self.kick("Authentication flow error"); AuthState::Errored }
+        };
+        println!("{:?}", self.auth_state);
+    }
+
+    fn auth_cert_hash(&mut self, cert_hash: String) {
+        self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
+            AuthState::Initial => AuthState::CertKnown { cert_hash },
+            _ => { self.kick("Authentication flow error"); AuthState::Errored }
+        };
+        println!("{:?}", self.auth_state);
+    }
+
+    fn auth_ckey(&mut self, ckey: String) {
+        self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
+            AuthState::Initial => AuthState::CkeyKnown { ckey },
+            AuthState::CertKnown { cert_hash: _ } => AuthState::CkeyKnown { ckey },
+            AuthState::UsernameKnown { cert_hash: _, username } => self.authenticated(ckey, username),
+            _ => { self.kick("Authentication flow error"); AuthState::Errored }
+        };
+        println!("{:?}", self.auth_state);
+    }
+
+    fn auth_username(&mut self, username: String) {
+        self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
+            AuthState::UsernameKnown { cert_hash, username: _ } => AuthState::UsernameKnown { cert_hash, username },
+            AuthState::CertKnown { cert_hash } => AuthState::UsernameKnown { cert_hash, username },
+            AuthState::CkeyKnown { ckey } => self.authenticated(ckey, username),
+            AuthState::AuthDisabled => self.authenticated(ckey(&username), username),
+            _ => { self.kick("Authentication flow error"); AuthState::Errored }
+        };
+        println!("{:?}", self.auth_state);
+    }
+
+    fn authenticated(&mut self, ckey: String, username: String) -> AuthState {
+        AuthState::Active { ckey, username }
+    }
+
+    fn ckey_(&self) -> Option<&str> {
+        match self.auth_state {
+            AuthState::Active { ref ckey, .. } => Some(ckey),
+            _ => None,
+        }
+    }
 }
