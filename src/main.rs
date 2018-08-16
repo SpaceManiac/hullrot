@@ -123,6 +123,9 @@ type ZGroup = i32;
 const DEADCHAT: Freq = Freq(1);
 const GALCOM: &str = "/datum/language/common";
 
+/// Messages that Hullrot may receive from the game.
+///
+/// Docs indicate how the server will react to the message.
 #[derive(Deserialize, Debug, Clone)]
 enum ControlIn {
     /// Server will print the message to its logs.
@@ -224,6 +227,9 @@ enum ControlIn {
     },
 }
 
+/// Messages that Hullrot may send to the game.
+///
+/// Docs indicate how the game should react to the message.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 enum ControlOut {
     /// The server version. Always the first thing sent to a new control client.
@@ -280,6 +286,28 @@ enum ControlOut {
         ckey: String,
         connected: bool,
     },
+}
+
+#[derive(Debug, Default)]
+pub struct MobState {
+    /// The Z-level of the mob, for subspace comms - 0 is observer
+    z: Z,
+    /// Mute (e.g. unconscious, muzzled, no tongue)
+    mute: bool,
+    /// Deaf (e.g. unconscious, flashbanged, genetic damage)
+    deaf: bool,
+    /// Currently spoken language
+    current_language: String,
+    /// All understood languages
+    known_languages: HashSet<String>,
+    /// List of nearby ckeys who can hear us speak
+    local_with: HashSet<String>,
+    /// Current PTT channel, or None
+    push_to_talk: Option<Freq>,
+    /// Radio channels on which the mob is speaking automatically
+    hot_freqs: HashSet<Freq>,
+    /// Radio channels which the mob can hear, e.g. 1459 for common
+    hear_freqs: HashSet<Freq>,
 }
 
 // ----------------------------------------------------------------------------
@@ -346,26 +374,28 @@ impl<'cfg> Server<'cfg> {
                     self.linkage = map.into_iter().map(|(k, v)| (k.parse().unwrap(), v)).collect();
                 },
                 ControlIn::SetMobFlags { who, speak, hear } => with_client!(who; |c| {
-                    c.mute = !speak;
-                    c.deaf = !hear;
+                    c.mob.mute = !speak;
+                    c.mob.deaf = !hear;
                 }),
-                ControlIn::SetPTT { who, freq } => with_client!(who; |c| c.push_to_talk = freq),
-                ControlIn::SetLocalWith { who, with } => with_client!(who; |c| c.local_with = with),
-                ControlIn::SetHearFreqs { who, hear } => with_client!(who; |c| c.hear_freqs = hear),
-                ControlIn::SetHotFreqs { who, hot } => with_client!(who; |c| c.hot_freqs = hot),
-                ControlIn::SetZ { who, z } => with_client!(who; |c| c.z = z),
-                ControlIn::SetLanguages { who, known } => with_client!(who; |c| c.known_languages = known),
-                ControlIn::SetSpokenLanguage { who, spoken } => with_client!(who; |c| c.current_language = spoken),
+                ControlIn::SetPTT { who, freq } => with_client!(who; |c| c.mob.push_to_talk = freq),
+                ControlIn::SetLocalWith { who, with } => with_client!(who; |c| c.mob.local_with = with),
+                ControlIn::SetHearFreqs { who, hear } => with_client!(who; |c| c.mob.hear_freqs = hear),
+                ControlIn::SetHotFreqs { who, hot } => with_client!(who; |c| c.mob.hot_freqs = hot),
+                ControlIn::SetZ { who, z } => with_client!(who; |c| c.mob.z = z),
+                ControlIn::SetLanguages { who, known } => with_client!(who; |c| c.mob.known_languages = known),
+                ControlIn::SetSpokenLanguage { who, spoken } => with_client!(who; |c| c.mob.current_language = spoken),
                 ControlIn::SetGhost(who) => with_client!(who; |c| {
-                    c.z = 0;
-                    c.mute = false;
-                    c.deaf = false;
-                    c.current_language = GALCOM.to_owned();
-                    c.known_languages = once(GALCOM.to_owned()).collect();
-                    c.local_with.clear();
-                    c.push_to_talk = None;
-                    c.hot_freqs = once(DEADCHAT).collect();
-                    c.hear_freqs = once(DEADCHAT).collect();
+                    c.mob = MobState {
+                        z: 0,
+                        mute: false,
+                        deaf: false,
+                        current_language: GALCOM.to_owned(),
+                        known_languages: once(GALCOM.to_owned()).collect(),
+                        local_with: HashSet::new(),
+                        push_to_talk: None,
+                        hot_freqs: once(DEADCHAT).collect(),
+                        hear_freqs: once(DEADCHAT).collect(),
+                    };
                 }),
                 ControlIn::SetGhostEars { who, ears } => with_client!(who; |c| {
                     c.ghost_ears = ears;
@@ -440,18 +470,9 @@ pub struct Client<'cfg> {
 
     speaking: bool,  // whether our speech bubble is currently being shown
     self_deaf: bool,  // deafened in the Mumble client
-
-    // language and radio information
-    z: Z,  // the Z-level, for subspace comms - 0 is observer
-    mute: bool,  // mute (e.g. unconscious, muzzled, no tongue)
-    deaf: bool,  // deaf (e.g. unconscious, flashbanged, genetic damage)
-    ghost_ears: bool,  // whether all can be heard, only applies when z == 0
-    current_language: String,
-    known_languages: HashSet<String>,
-    local_with: HashSet<String>,  // list of nearby usernames who hear us
-    push_to_talk: Option<Freq>,  // current PTT channel, or None for local
-    hot_freqs: HashSet<Freq>,  // hot radio channels
-    hear_freqs: HashSet<Freq>,  // heard radio channels, e.g. 1459 for common
+    /// Disables location-based restriction when z == 0 (observer)
+    ghost_ears: bool,
+    mob: MobState,
 }
 
 impl<'cfg> Client<'cfg> {
@@ -475,19 +496,21 @@ impl<'cfg> Client<'cfg> {
 
             disconnected: None,
             events: VecDeque::new(),
-
-            z: 0,
             speaking: false,
-            mute: false,
-            deaf: false,
             self_deaf: false,
             ghost_ears: false,
-            current_language: GALCOM.to_owned(),
-            known_languages: once(GALCOM.to_owned()).collect(),
-            local_with: HashSet::new(),
-            push_to_talk: None,
-            hot_freqs: HashSet::new(),
-            hear_freqs: HashSet::new(),
+
+            mob: MobState {
+                z: 0,
+                mute: false,
+                deaf: false,
+                current_language: GALCOM.to_owned(),
+                known_languages: once(GALCOM.to_owned()).collect(),
+                local_with: HashSet::new(),
+                push_to_talk: None,
+                hot_freqs: HashSet::new(),
+                hear_freqs: HashSet::new(),
+            },
         }
     }
 
@@ -637,7 +660,7 @@ impl<'cfg> Client<'cfg> {
 
                     let ckey = if let Some(ckey) = self.ckey() { ckey.to_owned() } else { continue };
 
-                    if self.mute {  // bodily mute
+                    if self.mob.mute {  // bodily mute
                         server.write_with_cooldown(10_000, ControlOut::CannotSpeak(ckey.to_owned()));
                         self.unspeak(server);
                         continue;
@@ -645,63 +668,63 @@ impl<'cfg> Client<'cfg> {
 
                     // Transmit to anyone who can hear us
                     others.for_each(|other| {
-                        if other.self_deaf || other.deaf { return }
+                        if other.self_deaf || other.mob.deaf { return }
                         let other_ckey = if let Some(ckey) = other.ckey() { ckey } else { return };
 
-                        let ptt_heard = match self.push_to_talk {
-                            Some(freq) if other.hear_freqs.contains(&freq) => Some(freq),
+                        let ptt_heard = match self.mob.push_to_talk {
+                            Some(freq) if other.mob.hear_freqs.contains(&freq) => Some(freq),
                             _ => None,
                         };
-                        let shared_z = other.ghost() || server.linkage.get(&self.z)
-                            .and_then(|&a| server.linkage.get(&other.z).map(|&b| (a, b)))
-                            .map_or(self.z == other.z, |(a, b)| a == b);
+                        let shared_z = other.ghost() || server.linkage.get(&self.mob.z)
+                            .and_then(|&a| server.linkage.get(&other.mob.z).map(|&b| (a, b)))
+                            .map_or(self.mob.z == other.mob.z, |(a, b)| a == b);
 
                         let mut heard = false;
-                        if self.local_with.contains(other_ckey) {
+                        if self.mob.local_with.contains(other_ckey) {
                             heard = true;
                             server.write_with_cooldown(10_000, ControlOut::Hear {
                                 hearer: other_ckey.to_owned(),
                                 speaker: ckey.to_owned(),
                                 freq: None,
-                                language: self.current_language.to_owned(),
+                                language: self.mob.current_language.to_owned(),
                             });
                         }
                         if shared_z || other.ghost() {
-                            for freq in self.hot_freqs.intersection(&other.hear_freqs).cloned().chain(ptt_heard) {
+                            for freq in self.mob.hot_freqs.intersection(&other.mob.hear_freqs).cloned().chain(ptt_heard) {
                                 heard = true;
                                 server.write_with_cooldown(10_000, ControlOut::Hear {
                                     hearer: other_ckey.to_owned(),
                                     speaker: ckey.to_owned(),
                                     freq: Some(freq),
-                                    language: self.current_language.to_owned(),
+                                    language: self.mob.current_language.to_owned(),
                                 });
                             }
                         }
                         if other.ghost() && other.ghost_ears {
                             heard = true;
                         }
-                        if heard && (other.known_languages.contains(&self.current_language) || other.ghost()) {
+                        if heard && (other.mob.known_languages.contains(&self.mob.current_language) || other.ghost()) {
                             other.sender.send_voice(self.session, seq, audio.to_owned());
                         }
                     });
 
                     // Let us know if we cannot hear ourselves
-                    if self.deaf {
+                    if self.mob.deaf {
                         server.write_with_cooldown(10_000, ControlOut::HearSelf {
                             who: ckey.to_owned(),
                             freq: None,
-                            language: self.current_language.to_owned(),
+                            language: self.mob.current_language.to_owned(),
                         });
                     }
-                    let ptt_hear_self = match self.push_to_talk {
-                        Some(freq) if self.hear_freqs.contains(&freq) => Some(freq),
+                    let ptt_hear_self = match self.mob.push_to_talk {
+                        Some(freq) if self.mob.hear_freqs.contains(&freq) => Some(freq),
                         _ => None,
                     };
-                    for freq in self.hot_freqs.intersection(&self.hear_freqs).cloned().chain(ptt_hear_self) {
+                    for freq in self.mob.hot_freqs.intersection(&self.mob.hear_freqs).cloned().chain(ptt_hear_self) {
                         server.write_with_cooldown(10_000, ControlOut::HearSelf {
                             who: ckey.to_owned(),
                             freq: Some(freq),
-                            language: self.current_language.to_owned(),
+                            language: self.mob.current_language.to_owned(),
                         });
                     }
 
@@ -712,7 +735,7 @@ impl<'cfg> Client<'cfg> {
                         self.speaking = true;
                         server.write_queue.push_back(ControlOut::SpeechBubble {
                             who: ckey.to_owned(),
-                            with: self.local_with.iter().cloned().chain(once(ckey.to_owned())).collect(),
+                            with: self.mob.local_with.iter().cloned().chain(once(ckey.to_owned())).collect(),
                         });
                     }
                 }
@@ -737,7 +760,7 @@ impl<'cfg> Client<'cfg> {
     }
 
     fn ghost(&self) -> bool {
-        self.z == 0
+        self.mob.z == 0
     }
 }
 
@@ -838,16 +861,7 @@ impl<'cfg> Client<'cfg> {
             other.kick("Logged in from another client");
             self.session = replace(&mut other.session, 0);
 
-            self.z = other.z;
-            self.mute = other.mute;
-            self.deaf = other.deaf;
-            self.ghost_ears = other.ghost_ears;
-            self.current_language = replace(&mut other.current_language, Default::default());
-            self.known_languages = replace(&mut other.known_languages, Default::default());
-            self.local_with = replace(&mut other.local_with, Default::default());
-            self.push_to_talk = replace(&mut other.push_to_talk, Default::default());
-            self.hot_freqs = replace(&mut other.hot_freqs, Default::default());
-            self.hear_freqs = replace(&mut other.hear_freqs, Default::default());
+            self.mob = replace(&mut other.mob, Default::default());
         });
 
         others.for_each(|other| {
