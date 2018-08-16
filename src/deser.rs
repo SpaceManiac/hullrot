@@ -56,29 +56,37 @@ pub fn as_bool<'de, D: Deserializer<'de>>(de: D) -> Result<bool, D::Error> {
     de.deserialize_any(BoolVisitor)
 }
 
-/// Deserialize any number as an i32.
-pub fn as_int<'de, D: Deserializer<'de>>(de: D) -> Result<i32, D::Error> {
-    struct NumVisitor;
-    impl<'de> de::Visitor<'de> for NumVisitor {
-        type Value = i32;
+struct NumVisitor;
+impl<'de> de::Visitor<'de> for NumVisitor {
+    type Value = i32;
 
-        fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-            fmt.write_str("i32ish")
-        }
-
-        fn visit_i64<E: de::Error>(self, value: i64) -> Result<i32, E> {
-            Ok(value as i32)
-        }
-
-        fn visit_u64<E: de::Error>(self, value: u64) -> Result<i32, E> {
-            Ok(value as i32)
-        }
-
-        fn visit_f64<E: de::Error>(self, value: f64) -> Result<i32, E> {
-            Ok(value as i32)
-        }
+    fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.write_str("i32ish")
     }
-    de.deserialize_any(NumVisitor)
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<i32, E> {
+        Ok(value as i32)
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<i32, E> {
+        Ok(value as i32)
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<i32, E> {
+        Ok(value as i32)
+    }
+}
+
+impl<'de> Deserialize<'de> for ::Z {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<::Z, D::Error> {
+        de.deserialize_any(NumVisitor).map(::Z)
+    }
+}
+
+impl<'de> Deserialize<'de> for ::ZGroup {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<::ZGroup, D::Error> {
+        de.deserialize_any(NumVisitor).map(::ZGroup)
+    }
 }
 
 /// Deserialize any number as a u16.

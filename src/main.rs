@@ -44,6 +44,7 @@ use std::collections::{VecDeque, HashMap, HashSet};
 use std::time::{Instant, Duration};
 use std::borrow::Cow;
 use std::iter::once;
+use std::str::FromStr;
 
 use mumble_protocol::Permissions;
 
@@ -117,8 +118,18 @@ const WELCOME: &str = "\
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Serialize)]
 struct Freq(u16);
 
-type Z = i32;
-type ZGroup = i32;
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Serialize, Default)]
+struct Z(i32);
+
+impl FromStr for Z {
+    type Err = <i32 as FromStr>::Err;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        i32::from_str(s).map(Z)
+    }
+}
+
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Serialize)]
+struct ZGroup(i32);
 
 const DEADCHAT: Freq = Freq(1);
 const GALCOM: &str = "/datum/language/common";
@@ -171,7 +182,6 @@ enum ControlIn {
     /// Server will update which Z-level the given ckey is occupying.
     SetZ {
         who: String,
-        #[serde(deserialize_with="deser::as_int")]
         z: Z,
     },
 
@@ -199,7 +209,7 @@ enum ControlIn {
         ears: bool,
     },
 
-    /// Server will update.
+    /// Server will update Z-level interlinkage.
     ///
     /// Mapping should be from stringified Z-level to group number, e.g.
     /// `{"2": 1, "5": 1}` to indicate Z-levels 2 and 5 are connected.
@@ -386,7 +396,7 @@ impl<'cfg> Server<'cfg> {
                 ControlIn::SetSpokenLanguage { who, spoken } => with_client!(who; |c| c.mob.current_language = spoken),
                 ControlIn::SetGhost(who) => with_client!(who; |c| {
                     c.mob = MobState {
-                        z: 0,
+                        z: Z(0),
                         mute: false,
                         deaf: false,
                         current_language: GALCOM.to_owned(),
@@ -501,7 +511,7 @@ impl<'cfg> Client<'cfg> {
             ghost_ears: false,
 
             mob: MobState {
-                z: 0,
+                z: Z(0),
                 mute: false,
                 deaf: false,
                 current_language: GALCOM.to_owned(),
@@ -760,7 +770,7 @@ impl<'cfg> Client<'cfg> {
     }
 
     fn ghost(&self) -> bool {
-        self.mob.z == 0
+        self.mob.z == Z(0)
     }
 }
 
