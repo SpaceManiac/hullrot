@@ -131,6 +131,9 @@ impl FromStr for Z {
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Serialize)]
 struct ZGroup(i32);
 
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Serialize, Default)]
+struct Bool(bool);
+
 const DEADCHAT: Freq = Freq(1);
 const GALCOM: &str = "/datum/language/common";
 
@@ -233,6 +236,7 @@ enum ControlIn {
     /// Server will set whether the given ckey has Mumble admin rights.
     SetAdmin {
         ckey: String,
+        #[serde(deserialize_with="deser::as_bool")]
         is_admin: bool,
     },
 }

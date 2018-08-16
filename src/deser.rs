@@ -25,39 +25,45 @@ use std::cmp::Eq;
 
 use serde::*;
 
-use Freq;
-
 /// Deserialize 1 or 0 as true or false.
-pub fn as_bool<'de, D: Deserializer<'de>>(de: D) -> Result<bool, D::Error> {
-    struct BoolVisitor;
-    impl<'de> de::Visitor<'de> for BoolVisitor {
-        type Value = bool;
+struct BoolVisitor;
+impl<'de> de::Visitor<'de> for BoolVisitor {
+    type Value = bool;
 
-        fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-            fmt.write_str("boolish")
-        }
-
-        fn visit_i64<E: de::Error>(self, value: i64) -> Result<bool, E> {
-            Ok(value != 0)
-        }
-
-        fn visit_u64<E: de::Error>(self, value: u64) -> Result<bool, E> {
-            Ok(value != 0)
-        }
-
-        fn visit_f64<E: de::Error>(self, value: f64) -> Result<bool, E> {
-            Ok(value != 0.)
-        }
-
-        fn visit_bool<E: de::Error>(self, value: bool) -> Result<bool, E> {
-            Ok(value)
-        }
+    fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.write_str("boolish")
     }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<bool, E> {
+        Ok(value != 0)
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<bool, E> {
+        Ok(value != 0)
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<bool, E> {
+        Ok(value != 0.)
+    }
+
+    fn visit_bool<E: de::Error>(self, value: bool) -> Result<bool, E> {
+        Ok(value)
+    }
+}
+
+impl<'de> Deserialize<'de> for ::Bool {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<::Bool, D::Error> {
+        de.deserialize_any(BoolVisitor).map(::Bool)
+    }
+}
+
+pub fn as_bool<'de, D: Deserializer<'de>>(de: D) -> Result<bool, D::Error> {
     de.deserialize_any(BoolVisitor)
 }
 
-struct NumVisitor;
-impl<'de> de::Visitor<'de> for NumVisitor {
+/// Deserialize any number as an i32.
+struct I32Visitor;
+impl<'de> de::Visitor<'de> for I32Visitor {
     type Value = i32;
 
     fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
@@ -79,40 +85,41 @@ impl<'de> de::Visitor<'de> for NumVisitor {
 
 impl<'de> Deserialize<'de> for ::Z {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<::Z, D::Error> {
-        de.deserialize_any(NumVisitor).map(::Z)
+        de.deserialize_any(I32Visitor).map(::Z)
     }
 }
 
 impl<'de> Deserialize<'de> for ::ZGroup {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<::ZGroup, D::Error> {
-        de.deserialize_any(NumVisitor).map(::ZGroup)
+        de.deserialize_any(I32Visitor).map(::ZGroup)
     }
 }
 
 /// Deserialize any number as a u16.
-impl<'de> Deserialize<'de> for Freq {
-    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Freq, D::Error> {
-        struct NumVisitor;
-        impl<'de> de::Visitor<'de> for NumVisitor {
-            type Value = u16;
+struct U16Visitor;
+impl<'de> de::Visitor<'de> for U16Visitor {
+    type Value = u16;
 
-            fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-                fmt.write_str("u16ish")
-            }
+    fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.write_str("u16ish")
+    }
 
-            fn visit_i64<E: de::Error>(self, value: i64) -> Result<u16, E> {
-                Ok(value as u16)
-            }
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<u16, E> {
+        Ok(value as u16)
+    }
 
-            fn visit_u64<E: de::Error>(self, value: u64) -> Result<u16, E> {
-                Ok(value as u16)
-            }
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<u16, E> {
+        Ok(value as u16)
+    }
 
-            fn visit_f64<E: de::Error>(self, value: f64) -> Result<u16, E> {
-                Ok(value as u16)
-            }
-        }
-        de.deserialize_any(NumVisitor).map(Freq)
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<u16, E> {
+        Ok(value as u16)
+    }
+}
+
+impl<'de> Deserialize<'de> for ::Freq {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<::Freq, D::Error> {
+        de.deserialize_any(U16Visitor).map(::Freq)
     }
 }
 
