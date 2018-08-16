@@ -134,6 +134,12 @@ struct ZGroup(i32);
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, Serialize, Default)]
 struct Bool(bool);
 
+impl From<Bool> for bool {
+    fn from(other: Bool) -> bool {
+        other.0
+    }
+}
+
 const DEADCHAT: Freq = Freq(1);
 const GALCOM: &str = "/datum/language/common";
 
@@ -198,6 +204,11 @@ enum ControlIn {
     SetSpokenLanguage {
         who: String,
         spoken: String,
+    },
+
+    PatchMobState {
+        ckey: String,
+        patch: MobStatePatch,
     },
 
     /// Server will set the given ckey to observer mode, able to understand
@@ -303,7 +314,7 @@ enum ControlOut {
 }
 
 #[derive(Debug, Default)]
-pub struct MobState {
+struct MobState {
     /// The Z-level of the mob, for subspace comms - 0 is observer
     z: Z,
     /// Mute (e.g. unconscious, muzzled, no tongue)
@@ -322,6 +333,34 @@ pub struct MobState {
     hot_freqs: HashSet<Freq>,
     /// Radio channels which the mob can hear, e.g. 1459 for common
     hear_freqs: HashSet<Freq>,
+}
+
+#[derive(Debug, Default, Deserialize, Clone)]
+struct MobStatePatch {
+    z: Option<Z>,
+    mute: Option<Bool>,
+    deaf: Option<Bool>,
+    current_language: Option<String>,
+    known_languages: Option<HashSet<String>>,
+    local_with: Option<HashSet<String>>,
+    hot_freqs: Option<HashSet<Freq>>,
+    hear_freqs: Option<HashSet<Freq>>,
+}
+
+impl MobState {
+    fn apply(&mut self, patch: MobStatePatch) {
+        macro_rules! fields {
+            ($($name:ident,)*) => {$(
+                if let Some(new) = patch.$name {
+                    self.$name = new.into();
+                }
+            )*}
+        }
+        fields! {
+            z, mute, deaf, current_language, known_languages,
+            local_with, hot_freqs, hear_freqs,
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -410,6 +449,9 @@ impl<'cfg> Server<'cfg> {
                         hot_freqs: once(DEADCHAT).collect(),
                         hear_freqs: once(DEADCHAT).collect(),
                     };
+                }),
+                ControlIn::PatchMobState { ckey, patch } => with_client!(ckey; |c| {
+                    c.mob.apply(patch);
                 }),
                 ControlIn::SetGhostEars { who, ears } => with_client!(who; |c| {
                     c.ghost_ears = ears;
