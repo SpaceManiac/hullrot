@@ -354,11 +354,12 @@ struct MobStatePatch {
 impl MobState {
     fn apply(&mut self, patch: MobStatePatch) {
         macro_rules! fields {
-            ($($name:ident,)*) => {$(
-                if let Some(new) = patch.$name {
+            ($($name:ident,)*) => {
+                let MobStatePatch { $($name),* } = patch;
+                $(if let Some(new) = $name {
                     self.$name = new.into();
-                }
-            )*}
+                })*
+            }
         }
         fields! {
             z, mute, deaf, current_language, known_languages,
