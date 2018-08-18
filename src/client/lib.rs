@@ -49,13 +49,15 @@ fn with_output_buffer<F: FnOnce(&mut Vec<u8>)>(f: F) -> *const c_char {
     })
 }
 
+fn json_write<T: Serialize + ?Sized>(buf: &mut Vec<u8>, t: &T) {
+    if let Err(e) = serde_json::to_writer(&mut *buf, t) {
+        buf.clear();
+        let _ = write!(buf, r#"{{"error":{:?}}}"#, e.to_string());
+    }
+}
+
 fn json_response<T: Serialize + ?Sized>(t: &T) -> *const c_char {
-    with_output_buffer(|buf| {
-        if let Err(e) = serde_json::to_writer(&mut *buf, t) {
-            buf.clear();
-            let _ = write!(buf, r#"{{"error":{:?}}}"#, e.to_string());
-        }
-    })
+    with_output_buffer(|buf| json_write(buf, t))
 }
 
 fn error<T: AsRef<str>>(msg: T) -> *const c_char {
@@ -111,19 +113,28 @@ function! { hullrot_dll_version() {
     }
     json_response(&Version {
         version: env!("CARGO_PKG_VERSION"),
-        major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
-        minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
-        patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
+        major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap_or(0),
+        minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap_or(0),
+        patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap_or(0),
     })
 }}
 
-function! { hullrot_init() {
+function! { hullrot_init(args) {
     HANDLE.with(|cell| {
         let mut opt = cell.borrow_mut();
         if opt.is_some() {
             return error("already initialized");
         }
-        match Handle::init() {
+
+        let addr = match args.first() {
+            None => "127.0.0.1:10961",
+            Some(addr) => match std::str::from_utf8(addr) {
+                Ok(addr) => addr,
+                Err(_) => return error("non-utf8 server address"),
+            }
+        };
+
+        match Handle::init(addr) {
             Ok(handle) => {
                 // return the first event, should either be a Fatal or a Version
                 let msg = match handle.rx.recv_timeout(std::time::Duration::from_secs(5)) {
@@ -185,8 +196,8 @@ struct Handle {
 
 impl Handle {
     /// Attempt to initialize and spawn the server in its child thread.
-    fn init() -> Result<Handle, String> {
-        let init = init_control().map_err(|e| e.to_string())?;
+    fn init(addr: &str) -> Result<Handle, String> {
+        let init = init_control(addr).map_err(|e| e.to_string())?;
         let (control_tx, control_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let thread = std::thread::spawn(|| control_thread(init, control_rx, event_tx));
@@ -206,9 +217,9 @@ struct Init {
     stream: TcpStream,
 }
 
-fn init_control() -> Result<Init, Box<::std::error::Error>> {
+fn init_control(addr: &str) -> Result<Init, Box<::std::error::Error>> {
     let poll = Poll::new()?;
-    let addr = "127.0.0.1:10961".parse()?;
+    let addr = addr.parse()?;
     let stream = TcpStream::connect(&addr)?;
     poll.register(&stream, CLIENT, Ready::readable() | Ready::writable(), PollOpt::edge())?;
     Ok(Init { poll, stream })
@@ -283,10 +294,7 @@ fn control_fatal(event_tx: &mpsc::Sender<Vec<u8>>, text: &str) {
     }
 
     let mut buf = Vec::new();
-    if let Err(e) = serde_json::to_writer(&mut buf, &Error { Fatal: text }) {
-        buf.clear();
-        let _ = write!(buf, r#"{{"error":{:?}}}"#, e.to_string());
-    }
+    json_write(&mut buf, &Error { Fatal: text });
     let _ = event_tx.send(buf);
 }
 
@@ -300,7 +308,7 @@ fn read_packets<R: BufRead + ?Sized>(read: &mut R, event_tx: &mpsc::Sender<Vec<u
             }
             // 4 bytes length followed by json
             while buffer.len() >= 4 {
-                let len = 4 + (&buffer[..]).read_u32::<BigEndian>().unwrap() as usize;
+                let len = 4 + (&buffer[..]).read_u32::<BigEndian>()? as usize;
                 if buffer.len() < len {
                     break;  // incomplete
                 }
