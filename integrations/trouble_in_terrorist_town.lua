@@ -40,14 +40,9 @@ if GetConVarString("gamemode") == "terrortown" and SERVER then
 		-- Alive players are always speaking on the living channel.
 		local name = string.lower(ply:GetName())
 		sendPacket {
-			SetHearFreqs = {
-				who = name,
+			PatchMobState = {
+				ckey = name,
 				hear = { 1 },
-			}
-		}
-		sendPacket {
-			SetHotFreqs = {
-				who = name,
 				hot = { 1 },
 			}
 		}
@@ -57,15 +52,10 @@ if GetConVarString("gamemode") == "terrortown" and SERVER then
 		-- Dead players can hear both channels, but only speak to other dead.
 		local name = string.lower(ply:GetName())
 		sendPacket {
-			SetHearFreqs = {
-				who = name,
+			PatchMobState = {
+				ckey = name,
 				hear = { 1, 2 },
-			}
-		}
-		sendPacket {
-			SetHotFreqs = {
-				who = name,
-				hot = { 2 }
+				hot = { 2 },
 			}
 		}
 	end
@@ -73,7 +63,7 @@ if GetConVarString("gamemode") == "terrortown" and SERVER then
 	local function TTTPrepareRound()
 		-- The round is setting up, we are not yet playing.
 		sendPacket {
-			Playing = 0
+			Playing = false
 		}
 	end
 
@@ -94,14 +84,14 @@ if GetConVarString("gamemode") == "terrortown" and SERVER then
 		end
 		-- The round has started, we are now playing.
 		sendPacket {
-			Playing = 1
+			Playing = true
 		}
 	end
 
 	local function TTTEndRound(result)
 		-- The round has ended, we are no longer playing.
 		sendPacket {
-			Playing = 0
+			Playing = false
 		}
 	end
 
@@ -148,7 +138,7 @@ if GetConVarString("gamemode") == "terrortown" and SERVER then
 		timer.Simple(0.005, function()
 			if GetRoundState() == ROUND_ACTIVE && Hullrot_CheckForWin() != WIN_NONE then
 				sendPacket {
-					Playing = 0
+					Playing = false
 				}
 			end
 		end)

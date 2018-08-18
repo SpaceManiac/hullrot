@@ -163,6 +163,7 @@ enum ControlIn {
     /// Server will update the ckey's mob state according to the patch.
     PatchMobState {
         ckey: String,
+        #[serde(flatten)]  // fields on MobStatePatch appear here directly
         patch: MobStatePatch,
     },
 
@@ -190,69 +191,6 @@ enum ControlIn {
     /// client with the given ckey.
     CheckConnected {
         ckey: String,
-    },
-
-    /// Server will set whether the given ckey has Mumble admin rights.
-    SetAdmin {
-        ckey: String,
-        #[serde(deserialize_with="deser::as_bool")]
-        is_admin: bool,
-    },
-
-    /// Server will set whether the given ckey, when an observer, can hear
-    /// everything.
-    SetGhostEars {
-        who: String,
-        #[serde(deserialize_with="deser::as_bool")]
-        ears: bool,
-    },
-
-    // ------------------------------------------------------------------------
-    // Deprecated
-
-    /// Server will update whether the ckey can speak/hear.
-    SetMobFlags {
-        who: String,
-        #[serde(deserialize_with="deser::as_bool")]
-        speak: bool,
-        #[serde(deserialize_with="deser::as_bool")]
-        hear: bool,
-    },
-
-    /// Server will update which other ckeys can hear `who` due to proximity.
-    SetLocalWith {
-        who: String,
-        with: HashSet<String>,
-    },
-
-    /// Server will update which frequencies the ckey can hear.
-    SetHearFreqs {
-        who: String,
-        hear: HashSet<Freq>,
-    },
-
-    /// Server will update which frequencies the ckey is always speaking on.
-    SetHotFreqs {
-        who: String,
-        hot: HashSet<Freq>,
-    },
-
-    /// Server will update which Z-level the given ckey is occupying.
-    SetZ {
-        who: String,
-        z: Z,
-    },
-
-    /// Server will update which languages the given ckey understands.
-    SetLanguages {
-        who: String,
-        known: HashSet<String>,
-    },
-
-    /// Server will set which language the given ckey is speaking in.
-    SetSpokenLanguage {
-        who: String,
-        spoken: String,
     },
 }
 
@@ -484,24 +422,6 @@ impl<'cfg> Server<'cfg> {
                         connected: false,
                     });
                 }),
-                ControlIn::SetAdmin { ckey, is_admin } => with_client!(ckey; |c| {
-                    c.admin = is_admin;
-                    c.update_permissions();
-                }),
-                ControlIn::SetGhostEars { who, ears } => with_client!(who; |c| {
-                    c.ghost_ears = ears;
-                }),
-                // Deprecated -------------------------------------------------
-                ControlIn::SetMobFlags { who, speak, hear } => with_client!(who; |c| {
-                    c.mob.mute = !speak;
-                    c.mob.deaf = !hear;
-                }),
-                ControlIn::SetLocalWith { who, with } => with_client!(who; |c| c.mob.local_with = with),
-                ControlIn::SetHearFreqs { who, hear } => with_client!(who; |c| c.mob.hear_freqs = hear),
-                ControlIn::SetHotFreqs { who, hot } => with_client!(who; |c| c.mob.hot_freqs = hot),
-                ControlIn::SetZ { who, z } => with_client!(who; |c| c.mob.z = z),
-                ControlIn::SetLanguages { who, known } => with_client!(who; |c| c.mob.known_languages = known),
-                ControlIn::SetSpokenLanguage { who, spoken } => with_client!(who; |c| c.mob.current_language = spoken),
             }
         }
     }
