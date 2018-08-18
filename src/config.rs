@@ -53,6 +53,9 @@ pub struct Config {
     /// Currently stored as an unsynchronized TOML file, subject to change.
     #[serde(skip_serializing)]
     pub auth_db: Option<AuthDB>,
+
+    /// Whether the control channel should be debug logged.
+    pub verbose_control: bool,
 }
 
 impl Default for Config {
@@ -64,6 +67,7 @@ impl Default for Config {
             cert_pem: "cert.pem".to_owned(),
             key_pem: "key.pem".to_owned(),
             auth_db: None,
+            verbose_control: false,
         }
     }
 }

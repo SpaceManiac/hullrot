@@ -310,7 +310,9 @@ pub fn server_thread(init: Init, config: &Config) {
                     }
                     break;
                 } else if let Some(event) = control.write_queue.pop_front() {
-                    //println!("CONTROL OUT: {:?}", event);
+                    if config.verbose_control {
+                        println!("CONTROL OUT: {:?}", event);
+                    }
                     let vec = match ::serde_json::to_vec(&event) {
                         Ok(vec) => vec,
                         Err(e) => { println!("CONTROL: serialize error: {:?}", e); break; }
@@ -831,7 +833,6 @@ impl ControlConnection {
                     }
                     match ::serde_json::from_slice::<ControlIn>(&buffer[4..len]) {
                         Ok(msg) => {
-                            //println!("CONTROL IN: {:?}", msg);
                             read_queue.push_back(msg);
                         }
                         Err(e) => println!("CONTROL in error: {:?}", e)

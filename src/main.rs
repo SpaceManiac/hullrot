@@ -425,7 +425,9 @@ impl<'cfg> Server<'cfg> {
         }
 
         while let Some(control_in) = self.read_queue.pop_front() {
-            println!("{:?}", control_in);
+            if self.config.verbose_control {
+                println!("CONTROL IN: {:?}", control_in);
+            }
             match control_in {
                 ControlIn::Debug(msg) => println!("CONTROL dbg: {}", msg),
                 ControlIn::Playing(playing) => self.playing = playing,
