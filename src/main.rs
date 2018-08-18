@@ -154,13 +154,16 @@ enum ControlIn {
     /// Server will enable/disable location-based talk restrictions.
     Playing(#[serde(deserialize_with="deser::as_bool")] bool),
 
-    /// Server will update whether the ckey can speak/hear.
-    SetMobFlags {
-        who: String,
-        #[serde(deserialize_with="deser::as_bool")]
-        speak: bool,
-        #[serde(deserialize_with="deser::as_bool")]
-        hear: bool,
+    /// Server will update Z-level interlinkage.
+    ///
+    /// Mapping should be from stringified Z-level to group number, e.g.
+    /// `{"2": 1, "5": 1}` to indicate Z-levels 2 and 5 are connected.
+    Linkage(#[serde(deserialize_with="deser::as_map")] HashMap<String, ZGroup>),
+
+    /// Server will update the ckey's mob state according to the patch.
+    PatchMobState {
+        ckey: String,
+        patch: MobStatePatch,
     },
 
     /// Server will update whether the ckey is holding push-to-talk on the
@@ -168,6 +171,52 @@ enum ControlIn {
     SetPTT {
         who: String,
         freq: Option<Freq>,
+    },
+
+    /// Server will set the given ckey to observer mode, able to understand
+    /// all languages and hear anything they are in range of.
+    SetGhost(String),
+
+    /// Server will create association between trusted ckey and user-provided
+    /// certificate hash.
+    ///
+    /// Requires that an unauthenticated client with that hash is connected.
+    Register {
+        cert_hash: String,
+        ckey: String,
+    },
+
+    /// Server will send `IsConnected` indicating whether there is an authed
+    /// client with the given ckey.
+    CheckConnected {
+        ckey: String,
+    },
+
+    /// Server will set whether the given ckey has Mumble admin rights.
+    SetAdmin {
+        ckey: String,
+        #[serde(deserialize_with="deser::as_bool")]
+        is_admin: bool,
+    },
+
+    /// Server will set whether the given ckey, when an observer, can hear
+    /// everything.
+    SetGhostEars {
+        who: String,
+        #[serde(deserialize_with="deser::as_bool")]
+        ears: bool,
+    },
+
+    // ------------------------------------------------------------------------
+    // Deprecated
+
+    /// Server will update whether the ckey can speak/hear.
+    SetMobFlags {
+        who: String,
+        #[serde(deserialize_with="deser::as_bool")]
+        speak: bool,
+        #[serde(deserialize_with="deser::as_bool")]
+        hear: bool,
     },
 
     /// Server will update which other ckeys can hear `who` due to proximity.
@@ -204,51 +253,6 @@ enum ControlIn {
     SetSpokenLanguage {
         who: String,
         spoken: String,
-    },
-
-    PatchMobState {
-        ckey: String,
-        patch: MobStatePatch,
-    },
-
-    /// Server will set the given ckey to observer mode, able to understand
-    /// all languages and hear anything they are in range of.
-    SetGhost(String),
-
-    /// Server will set whether the given ckey, when an observer, can hear
-    /// everything.
-    SetGhostEars {
-        who: String,
-        #[serde(deserialize_with="deser::as_bool")]
-        ears: bool,
-    },
-
-    /// Server will update Z-level interlinkage.
-    ///
-    /// Mapping should be from stringified Z-level to group number, e.g.
-    /// `{"2": 1, "5": 1}` to indicate Z-levels 2 and 5 are connected.
-    Linkage(#[serde(deserialize_with="deser::as_map")] HashMap<String, ZGroup>),
-
-    /// Server will create association between trusted ckey and user-provided
-    /// certificate hash.
-    ///
-    /// Requires that an unauthenticated client with that hash is connected.
-    Register {
-        cert_hash: String,
-        ckey: String,
-    },
-
-    /// Server will send `IsConnected` indicating whether there is an authed
-    /// client with the given ckey.
-    CheckConnected {
-        ckey: String,
-    },
-
-    /// Server will set whether the given ckey has Mumble admin rights.
-    SetAdmin {
-        ckey: String,
-        #[serde(deserialize_with="deser::as_bool")]
-        is_admin: bool,
     },
 }
 
@@ -427,17 +431,10 @@ impl<'cfg> Server<'cfg> {
                 ControlIn::Linkage(map) => {
                     self.linkage = map.into_iter().map(|(k, v)| (k.parse().unwrap(), v)).collect();
                 },
-                ControlIn::SetMobFlags { who, speak, hear } => with_client!(who; |c| {
-                    c.mob.mute = !speak;
-                    c.mob.deaf = !hear;
+                ControlIn::PatchMobState { ckey, patch } => with_client!(ckey; |c| {
+                    c.mob.apply(patch);
                 }),
                 ControlIn::SetPTT { who, freq } => with_client!(who; |c| c.mob.push_to_talk = freq),
-                ControlIn::SetLocalWith { who, with } => with_client!(who; |c| c.mob.local_with = with),
-                ControlIn::SetHearFreqs { who, hear } => with_client!(who; |c| c.mob.hear_freqs = hear),
-                ControlIn::SetHotFreqs { who, hot } => with_client!(who; |c| c.mob.hot_freqs = hot),
-                ControlIn::SetZ { who, z } => with_client!(who; |c| c.mob.z = z),
-                ControlIn::SetLanguages { who, known } => with_client!(who; |c| c.mob.known_languages = known),
-                ControlIn::SetSpokenLanguage { who, spoken } => with_client!(who; |c| c.mob.current_language = spoken),
                 ControlIn::SetGhost(who) => with_client!(who; |c| {
                     c.mob = MobState {
                         z: Z(0),
@@ -450,12 +447,6 @@ impl<'cfg> Server<'cfg> {
                         hot_freqs: once(DEADCHAT).collect(),
                         hear_freqs: once(DEADCHAT).collect(),
                     };
-                }),
-                ControlIn::PatchMobState { ckey, patch } => with_client!(ckey; |c| {
-                    c.mob.apply(patch);
-                }),
-                ControlIn::SetGhostEars { who, ears } => with_client!(who; |c| {
-                    c.ghost_ears = ears;
                 }),
                 ControlIn::Register { cert_hash, ckey } => {
                     if let Some(ref auth_db) = self.config.auth_db {
@@ -494,6 +485,20 @@ impl<'cfg> Server<'cfg> {
                     c.admin = is_admin;
                     c.update_permissions();
                 }),
+                ControlIn::SetGhostEars { who, ears } => with_client!(who; |c| {
+                    c.ghost_ears = ears;
+                }),
+                // Deprecated -------------------------------------------------
+                ControlIn::SetMobFlags { who, speak, hear } => with_client!(who; |c| {
+                    c.mob.mute = !speak;
+                    c.mob.deaf = !hear;
+                }),
+                ControlIn::SetLocalWith { who, with } => with_client!(who; |c| c.mob.local_with = with),
+                ControlIn::SetHearFreqs { who, hear } => with_client!(who; |c| c.mob.hear_freqs = hear),
+                ControlIn::SetHotFreqs { who, hot } => with_client!(who; |c| c.mob.hot_freqs = hot),
+                ControlIn::SetZ { who, z } => with_client!(who; |c| c.mob.z = z),
+                ControlIn::SetLanguages { who, known } => with_client!(who; |c| c.mob.known_languages = known),
+                ControlIn::SetSpokenLanguage { who, spoken } => with_client!(who; |c| c.mob.current_language = spoken),
             }
         }
     }
