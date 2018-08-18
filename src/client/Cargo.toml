@@ -1,8 +1,13 @@
 [package]
-name = "hullrot"
+name = "hullrot-client"
 version = "0.1.0"
 authors = ["Tad Hardesty <tad@platymuus.com>"]
-description = "Immersive roleplaying Mumble server"
+description = "dylib with BYOND-integrable "
+
+[lib]
+name = "hullrot"
+path = "lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [profile.release]
 lto = true
@@ -10,12 +15,7 @@ lto = true
 [dependencies]
 libc = "0.2.0"
 mio = "0.6.11"
-openssl = "0.10.11"
 byteorder = "1.1.0"
 serde = "1.0.21"
 serde_derive = "1.0.21"
 serde_json = "1.0.6"
-toml = "0.4.6"
-opus = "0.2.1"
-mumble-protocol = { path = "src/protocol" }
-hullrot-client = { path = "src/client" }
