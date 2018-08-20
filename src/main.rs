@@ -257,7 +257,10 @@ enum ControlOut {
 
 #[derive(Debug, Default)]
 struct MobState {
-    /// The Z-level of the mob, for subspace comms - 0 is observer
+    /// The Z-level of the mob, for subspace comms.
+    ///
+    /// If 0, language and z-level linkage checks are disabled when considering
+    /// what this mob can hear. Frequency checks are still enabled.
     z: Z,
     /// Mute (e.g. unconscious, muzzled, no tongue)
     mute: bool,
@@ -656,14 +659,6 @@ impl<'cfg> Client<'cfg> {
                         if other.self_deaf || other.mob.deaf { return }
                         let other_ckey = if let Some(ckey) = other.ckey() { ckey } else { return };
 
-                        let ptt_heard = match self.mob.push_to_talk {
-                            Some(freq) if other.mob.hear_freqs.contains(&freq) => Some(freq),
-                            _ => None,
-                        };
-                        let shared_z = other.ghost() || server.linkage.get(&self.mob.z)
-                            .and_then(|&a| server.linkage.get(&other.mob.z).map(|&b| (a, b)))
-                            .map_or(self.mob.z == other.mob.z, |(a, b)| a == b);
-
                         let mut heard = false;
                         if self.mob.local_with.contains(other_ckey) {
                             heard = true;
@@ -674,7 +669,15 @@ impl<'cfg> Client<'cfg> {
                                 language: self.mob.current_language.to_owned(),
                             });
                         }
-                        if shared_z || other.ghost() {
+
+                        let shared_z = other.ghost() || server.linkage.get(&self.mob.z)
+                            .and_then(|&a| server.linkage.get(&other.mob.z).map(|&b| (a, b)))
+                            .map_or(self.mob.z == other.mob.z, |(a, b)| a == b);
+                        if shared_z {
+                            let ptt_heard = match self.mob.push_to_talk {
+                                Some(freq) if other.mob.hear_freqs.contains(&freq) => Some(freq),
+                                _ => None,
+                            };
                             for freq in self.mob.hot_freqs.intersection(&other.mob.hear_freqs).cloned().chain(ptt_heard) {
                                 heard = true;
                                 server.write_with_cooldown(10_000, ControlOut::Hear {

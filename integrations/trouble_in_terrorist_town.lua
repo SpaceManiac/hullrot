@@ -42,8 +42,8 @@ if GetConVarString("gamemode") == "terrortown" and SERVER then
 		sendPacket {
 			PatchMobState = {
 				ckey = name,
-				hear = { 1 },
-				hot = { 1 },
+				hear_freqs = { 1 },
+				hot_freqs = { 1 },
 			}
 		}
 	end
@@ -54,8 +54,8 @@ if GetConVarString("gamemode") == "terrortown" and SERVER then
 		sendPacket {
 			PatchMobState = {
 				ckey = name,
-				hear = { 1, 2 },
-				hot = { 2 },
+				hear_freqs = { 1, 2 },
+				hot_freqs = { 2 },
 			}
 		}
 	end
