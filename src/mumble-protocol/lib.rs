@@ -17,6 +17,8 @@ pub extern crate protobuf;
 extern crate byteorder;
 #[macro_use] extern crate bitflags;
 
+pub const PROTOCOL_LICENSE: &str = include_str!("Mumble.proto.LICENSE");
+
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 pub use generated::*;
 

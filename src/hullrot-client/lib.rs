@@ -21,7 +21,7 @@ extern crate serde;
 extern crate serde_json;
 #[macro_use] extern crate serde_derive;
 
-pub mod util;
+extern crate hullrot_common;
 
 use std::cell::RefCell;
 use std::sync::mpsc;
@@ -229,8 +229,8 @@ fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mps
     let Init { poll, mut stream } = init;
     let mut events = Events::with_capacity(1024);
 
-    let mut read_buf = util::BufReader::new();
-    let mut write_buf = util::BufWriter::new();
+    let mut read_buf = hullrot_common::BufReader::new();
+    let mut write_buf = hullrot_common::BufWriter::new();
 
     'main: loop {
         if let Err(e) = poll.poll(&mut events, Some(::std::time::Duration::from_millis(5))) {

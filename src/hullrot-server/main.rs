@@ -25,7 +25,7 @@ extern crate serde_json;
 extern crate toml;
 #[macro_use] extern crate serde_derive;
 
-extern crate hullrot;
+extern crate hullrot_common;
 
 macro_rules! packet {
     ($ty:ident; $($name:ident: $value:expr,)*) => {{
@@ -105,7 +105,7 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.");
 }
 
 fn mumble_license() {
-    print!("{}", include_str!("protocol/Mumble.proto.LICENSE"));
+    print!("{}", mumble_protocol::PROTOCOL_LICENSE);
 }
 
 const WELCOME: &str = "\

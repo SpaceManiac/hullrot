@@ -30,7 +30,7 @@ use openssl::ssl::*;
 use opus::{Channels, Application, Bitrate, Decoder, Encoder};
 
 use mumble_protocol::Packet;
-use hullrot::util::*;
+use hullrot_common::{BufReader, BufWriter};
 use config::Config;
 use {Client, Server, ControlIn};
 
