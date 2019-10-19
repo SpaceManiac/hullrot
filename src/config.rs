@@ -74,7 +74,7 @@ impl Default for Config {
 
 impl Config {
     /// Load the config from a file.
-    pub fn load(path: &Path, default: bool) -> Result<Config, Box<::std::error::Error>> {
+    pub fn load(path: &Path, default: bool) -> Result<Config, Box<dyn (::std::error::Error)>> {
         println!("Loading {}", path.display());
         let mut buf = Vec::new();
         match File::open(path) {
@@ -92,7 +92,7 @@ impl Config {
     }
 
     /// Save the config to a file.
-    fn save(&self, path: &Path) -> Result<(), Box<::std::error::Error>> {
+    fn save(&self, path: &Path) -> Result<(), Box<dyn (::std::error::Error)>> {
         let mut file = File::create(path)?;
         file.write_all(&toml::ser::to_vec(&SerRoot { hullrot: self })?)?;
         Ok(())
@@ -118,7 +118,7 @@ pub struct AuthDB {
 }
 
 impl AuthDB {
-    fn load_inner(path: &Path) -> Result<BTreeMap<String, String>, Box<::std::error::Error>> {
+    fn load_inner(path: &Path) -> Result<BTreeMap<String, String>, Box<dyn (::std::error::Error)>> {
         let mut buf = Vec::new();
         match File::open(path) {
             Ok(mut file) => { file.read_to_end(&mut buf)?; },
@@ -131,7 +131,7 @@ impl AuthDB {
     }
 
     /// Load the DB from a file. If it does not exist, silently defaults.
-    pub fn load(path: &Path) -> Result<AuthDB, Box<::std::error::Error>> {
+    pub fn load(path: &Path) -> Result<AuthDB, Box<dyn (::std::error::Error)>> {
         println!("Loading {}", path.display());
         AuthDB::load_inner(path).map(|assoc| AuthDB {
             path: path.to_owned(),
@@ -139,7 +139,7 @@ impl AuthDB {
         })
     }
 
-    fn save(&self, path: &Path) -> Result<(), Box<::std::error::Error>> {
+    fn save(&self, path: &Path) -> Result<(), Box<dyn (::std::error::Error)>> {
         File::create(path)?.write_all(&toml::ser::to_vec(&*self.assoc.borrow())?)?;
         Ok(())
     }

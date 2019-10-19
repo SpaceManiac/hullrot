@@ -217,7 +217,7 @@ struct Init {
     stream: TcpStream,
 }
 
-fn init_control(addr: &str) -> Result<Init, Box<::std::error::Error>> {
+fn init_control(addr: &str) -> Result<Init, Box<dyn (::std::error::Error)>> {
     let poll = Poll::new()?;
     let addr = addr.parse()?;
     let stream = TcpStream::connect(&addr)?;

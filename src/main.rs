@@ -57,7 +57,7 @@ pub fn main() {
     }
 }
 
-pub fn run() -> Result<(), Box<std::error::Error>> {
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config_path_owned;
     let mut config_path = std::path::Path::new("hullrot.toml");
     let mut config_default = true;
