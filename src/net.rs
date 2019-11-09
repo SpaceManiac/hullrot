@@ -64,7 +64,7 @@ pub fn init_server(config: &Config) -> Result<Init, Box<::std::error::Error>> {
     }
 
     println!("Loading {}", config.cert_pem);
-    ctx.set_certificate_file(&config.cert_pem, SslFiletype::PEM)?;
+    ctx.set_certificate_chain_file(&config.cert_pem)?;
     println!("Loading {}", config.key_pem);
     ctx.set_private_key_file(&config.key_pem, SslFiletype::PEM)?;
     ctx.check_private_key()?;
