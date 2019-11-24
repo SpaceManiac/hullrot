@@ -57,7 +57,7 @@ impl Default for Config {
 
 impl Config {
     /// Load the config from a file.
-    pub fn load(path: &Path, default: bool) -> Result<Config, Box<::std::error::Error>> {
+    pub fn load(path: &Path, default: bool) -> Result<Config, Box<dyn std::error::Error>> {
         println!("Loading {}", path.display());
         let mut buf = Vec::new();
         match File::open(path) {
@@ -75,7 +75,7 @@ impl Config {
     }
 
     /// Save the config to a file.
-    fn save(&self, path: &Path) -> Result<(), Box<::std::error::Error>> {
+    fn save(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         let mut file = File::create(path)?;
         file.write_all(&toml::ser::to_vec(&SerRoot { hullrot: self })?)?;
         Ok(())

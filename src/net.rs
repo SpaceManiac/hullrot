@@ -51,7 +51,7 @@ pub struct Init {
     udp: UdpSocket,
 }
 
-pub fn init_server(config: &Config) -> Result<Init, Box<::std::error::Error>> {
+pub fn init_server(config: &Config) -> Result<Init, Box<dyn std::error::Error>> {
     // TODO: audit
     let mut ctx = SslContext::builder(SslMethod::tls())?;
     ctx.set_cipher_list("ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:\
@@ -89,7 +89,7 @@ pub fn init_server(config: &Config) -> Result<Init, Box<::std::error::Error>> {
 }
 
 #[deny(unused_must_use)]
-fn create_self_signed_cert(cert_pem: &str, key_pem: &str) -> Result<(), Box<::std::error::Error>> {
+fn create_self_signed_cert(cert_pem: &str, key_pem: &str) -> Result<(), Box<dyn std::error::Error>> {
     use openssl::x509::*;
     use openssl::x509::extension::*;
     use openssl::pkey::PKey;
