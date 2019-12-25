@@ -152,6 +152,7 @@ pub fn server_thread(init: Init, config: &Config) {
     let Init { ctx, poll, server, control_server, udp } = init;
     let mut encode_buf = vec![0u8; 1024]; // Docs say this could go up to 0x7fffff (8MiB - 1B) in size
     let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit
+    let mut udp_crypt_buf = [0u8; 1024];
     let mut udp_writeable = true;
     let mut udp_out_queue = VecDeque::new();
 
@@ -236,6 +237,15 @@ pub fn server_thread(init: Init, config: &Config) {
                         Err(e) => { println!("{:?}", e); continue },
                     };
                     let mut buf = &udp_buf[..len];
+                    eprintln!("{} {:?}", remote, buf);
+
+                    if let Some(connection) = clients.values_mut().next() {
+                        if let Some(crypt) = connection.client.crypt_state.as_mut() {
+                            crypt.decrypt(&buf, &mut udp_crypt_buf[..buf.len() - 4]);
+                            eprintln!("dec: {:?}", &udp_crypt_buf[..buf.len() - 4]);
+                        }
+                    }
+
                     match (|| -> Result<(), io::Error> {
                         let request_type = buf.read_u32::<BigEndian>()?;
                         match request_type {

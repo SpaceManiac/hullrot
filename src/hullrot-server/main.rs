@@ -452,6 +452,7 @@ pub struct Client<'cfg> {
     remote: std::net::SocketAddr,
     disconnected: Option<Cow<'static, str>>,
     events: VecDeque<net::Command>,
+    crypt_state: Option<udpcrypt::CryptState>,
     // state
     admin: bool,
     session: u32,
@@ -481,6 +482,7 @@ impl<'cfg> Client<'cfg> {
             session,
             admin,
             sender,
+            crypt_state: None,
             auth_state: AuthState::Initial,
 
             disconnected: None,
@@ -583,12 +585,11 @@ impl<'cfg> Client<'cfg> {
                     self.auth_username(name.to_owned(), server, others.reborrow());
 
                     // Bring the client up to speed
+                    let crypt_state = udpcrypt::CryptState::generate();
+                    self.sender.send(crypt_state.to_parameters());
+                    self.crypt_state = Some(crypt_state);
+
                     let permissions = self.permissions();
-                    self.sender.send(packet! { CryptSetup;
-                        set_key: vec![0; 16],
-                        set_client_nonce: vec![0; 16],
-                        set_server_nonce: vec![0; 16],
-                    });
                     self.sender.send(packet! { CodecVersion;
                         set_alpha: -2147483637,
                         set_beta: 0,
