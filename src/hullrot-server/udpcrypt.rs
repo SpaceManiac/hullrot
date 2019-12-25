@@ -202,6 +202,13 @@ fn xor(dst: &mut Keyblock, a: &Keyblock, b: &Keyblock) {
 }
 
 #[inline]
+fn xor_self(dst: &mut Keyblock, b: &Keyblock) {
+    for (dst_i, b_i) in dst.iter_mut().zip(b) {
+        *dst_i = *dst_i ^ *b_i;
+    }
+}
+
+#[inline]
 fn s2(block: &mut Keyblock) {
     let carry = swapped(block[0]) >> SHIFTBITS;
     for i in 0..BLOCKSIZE-1 {
@@ -241,19 +248,20 @@ fn ocb_encrypt(encrypt_key: &mut AesKey, mut plain: &[u8], mut encrypted: &mut [
     let mut len = plain.len();
 
     let mut delta = Keyblock::default();
-    let mut tmp = [0; AES_BLOCK_SIZE];
-    let mut pad = [0; AES_BLOCK_SIZE];
+    let mut tmp = Keyblock::default();
+    let mut pad = Keyblock::default();
 
     // Initialize
     aes_encrypt(nonce, &mut delta, encrypt_key);
-    let mut checksum = [0; AES_BLOCK_SIZE];
+    let mut checksum = Keyblock::default();
 
     while len > AES_BLOCK_SIZE {
         s2(&mut delta);
         xor(&mut tmp, &delta, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
-        aes_encrypt(&tmp, &mut tmp, encrypt_key);
+        aes_encrypt(&tmp, &mut pad, encrypt_key);
+        tmp.copy_from_slice(&pad);
         xor((&mut encrypted[..AES_BLOCK_SIZE]).try_into().unwrap(), &delta, &tmp);
-        xor(&mut checksum, &checksum, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
+        xor_self(&mut checksum, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
         len -= AES_BLOCK_SIZE;
         plain = &plain[AES_BLOCK_SIZE..];
         encrypted = &mut encrypted[AES_BLOCK_SIZE..];
@@ -262,12 +270,12 @@ fn ocb_encrypt(encrypt_key: &mut AesKey, mut plain: &[u8], mut encrypted: &mut [
     s2(&mut delta);
     zero(&mut tmp);
     tmp[BLOCKSIZE - 1] = swapped((len * 8) as Subblock);
-    xor(&mut tmp, &tmp, &delta);
+    xor_self(&mut tmp, &delta);
     aes_encrypt(&tmp, &mut pad, encrypt_key);
     tmp[..len].copy_from_slice(plain);
     tmp[len..].copy_from_slice(&pad[len..]);
-    xor(&mut checksum, &checksum, &tmp);
-    xor(&mut tmp, &pad, &tmp);
+    xor_self(&mut checksum, &tmp);
+    xor_self(&mut tmp, &pad);
     encrypted[..len].copy_from_slice(&tmp[..len]);
 
     s3(&mut delta);
@@ -275,24 +283,25 @@ fn ocb_encrypt(encrypt_key: &mut AesKey, mut plain: &[u8], mut encrypted: &mut [
     aes_encrypt(&tmp, tag, encrypt_key);
 }
 
-fn ocb_decrypt(encrypt_key: &mut AesKey, decrypt_key: &mut AesKey, encrypted: &[u8], plain: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
+fn ocb_decrypt(encrypt_key: &mut AesKey, decrypt_key: &mut AesKey, mut encrypted: &[u8], mut plain: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
     assert_eq!(plain.len(), encrypted.len());
     let mut len = plain.len();
 
     let mut delta = Keyblock::default();
-    let mut tmp = [0; AES_BLOCK_SIZE];
-    let mut pad = [0; AES_BLOCK_SIZE];
+    let mut tmp = Keyblock::default();
+    let mut pad = Keyblock::default();
 
     // Initialize
     aes_encrypt(nonce, &mut delta, encrypt_key);
-    let mut checksum = [0; AES_BLOCK_SIZE];
+    let mut checksum = Keyblock::default();
 
     while len > AES_BLOCK_SIZE {
         s2(&mut delta);
         xor(&mut tmp, &delta, (&encrypted[..AES_BLOCK_SIZE]).try_into().unwrap());
-        aes_decrypt(&tmp, &mut tmp, decrypt_key);
+        aes_decrypt(&tmp, &mut pad, decrypt_key);
+        tmp.copy_from_slice(&pad);
         xor((&mut plain[..AES_BLOCK_SIZE]).try_into().unwrap(), &delta, &tmp);
-        xor(&mut checksum, &checksum, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
+        xor_self(&mut checksum, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
         len -= AES_BLOCK_SIZE;
         plain = &mut plain[AES_BLOCK_SIZE..];
         encrypted = &encrypted[AES_BLOCK_SIZE..];
@@ -301,15 +310,15 @@ fn ocb_decrypt(encrypt_key: &mut AesKey, decrypt_key: &mut AesKey, encrypted: &[
     s2(&mut delta);
     zero(&mut tmp);
     tmp[BLOCKSIZE - 1] = swapped((len * 8) as Subblock);
-    xor(&mut tmp, &tmp, &delta);
+    xor_self(&mut tmp, &delta);
     aes_encrypt(&tmp, &mut pad, encrypt_key);
     zero(&mut tmp);
     tmp[..len].copy_from_slice(&encrypted[..len]);
-    xor(&mut tmp, &tmp, &pad);
-    xor(&mut checksum, &checksum, &tmp);
+    xor_self(&mut tmp, &pad);
+    xor_self(&mut checksum, &tmp);
     plain[..len].copy_from_slice(&tmp[..len]);
 
     s3(&mut delta);
     xor(&mut tmp, &delta, &checksum);
-    aes_encrypt(&tmp, &mut tag, encrypt_key);
+    aes_encrypt(&tmp, tag, encrypt_key);
 }

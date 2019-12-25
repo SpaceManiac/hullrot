@@ -241,8 +241,8 @@ pub fn server_thread(init: Init, config: &Config) {
 
                     if let Some(connection) = clients.values_mut().next() {
                         if let Some(crypt) = connection.client.crypt_state.as_mut() {
-                            crypt.decrypt(&buf, &mut udp_crypt_buf[..buf.len() - 4]);
-                            eprintln!("dec: {:?}", &udp_crypt_buf[..buf.len() - 4]);
+                            let ok = crypt.decrypt(&buf, &mut udp_crypt_buf[..buf.len() - 4]);
+                            eprintln!("dec: {} {:?}", ok, &udp_crypt_buf[..buf.len() - 4]);
                         }
                     }
 
