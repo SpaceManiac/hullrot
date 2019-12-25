@@ -165,6 +165,7 @@ fn increment_iv(iv: &mut [u8]) {
 // ----------------------------------------------------------------------------
 // OCB implementation
 
+/*
 #[cfg(target_pointer_width = "64")]
 mod platform {
     pub const BLOCKSIZE: usize = 2;
@@ -180,6 +181,11 @@ mod platform {
 }
 
 use self::platform::*;
+*/
+
+const BLOCKSIZE: usize = 128 / 8;
+const SHIFTBITS: u32 = 7;
+type Subblock = u8;
 
 type Keyblock = [Subblock; BLOCKSIZE];
 
@@ -242,10 +248,10 @@ fn ocb_encrypt(encrypt_key: &mut AesKey, mut plain: &[u8], mut encrypted: &mut [
 
     while len > AES_BLOCK_SIZE {
         s2(&mut delta);
-        xor(tmp, delta, reinterpret_cast<const subblock *>(plain));
+        xor(&mut tmp, &delta, plain);
         aes_encrypt(&tmp, &mut tmp, encrypt_key);
-        xor(reinterpret_cast<subblock *>(encrypted), delta, tmp);
-        xor(checksum, checksum, reinterpret_cast<const subblock *>(plain));
+        xor(encrypted, &delta, &tmp);
+        xor(&mut checksum, &checksum, plain);
         len -= AES_BLOCK_SIZE;
         plain = &plain[AES_BLOCK_SIZE..];
         encrypted = &mut encrypted[AES_BLOCK_SIZE..];
@@ -254,17 +260,17 @@ fn ocb_encrypt(encrypt_key: &mut AesKey, mut plain: &[u8], mut encrypted: &mut [
     s2(&mut delta);
     zero(&mut tmp);
     tmp[BLOCKSIZE - 1] = swapped((len * 8) as Subblock);
-    xor(tmp, tmp, delta);
-    aes_encrypt(tmp, pad, encrypt_key);
+    xor(&mut tmp, &tmp, &delta);
+    aes_encrypt(&tmp, &mut pad, encrypt_key);
     tmp[..len].copy_from_slice(plain);
-    tmp[len..].copy_from_slice(pad[len..]);
-    xor(checksum, checksum, tmp);
-    xor(tmp, pad, tmp);
+    tmp[len..].copy_from_slice(&pad[len..]);
+    xor(&mut checksum, &checksum, &tmp);
+    xor(&mut tmp, &pad, &tmp);
     encrypted[..len].copy_from_slice(&tmp[..len]);
 
-    s3(delta);
-    xor(tmp, delta, checksum);
-    aes_encrypt(tmp, tag, encrypt_key);
+    s3(&mut delta);
+    xor(&mut tmp, &delta, &checksum);
+    aes_encrypt(&tmp, tag, encrypt_key);
 }
 
 fn ocb_decrypt(encrypt_key: &mut AesKey, decrypt_key: &mut AesKey, encrypted: &[u8], plain: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
@@ -281,10 +287,10 @@ fn ocb_decrypt(encrypt_key: &mut AesKey, decrypt_key: &mut AesKey, encrypted: &[
 
     while len > AES_BLOCK_SIZE {
         s2(&mut delta);
-        xor(tmp, delta, reinterpret_cast<const subblock *>(encrypted));
+        xor(&mut tmp, &delta, encrypted);
         aes_decrypt(&tmp, &mut tmp, decrypt_key);
-        xor(reinterpret_cast<subblock *>(plain), delta, tmp);
-        xor(checksum, checksum, reinterpret_cast<const subblock *>(plain));
+        xor(&mut plain, &delta, &tmp);
+        xor(&mut checksum, &checksum, plain);
         len -= AES_BLOCK_SIZE;
         plain = &mut plain[AES_BLOCK_SIZE..];
         encrypted = &encrypted[AES_BLOCK_SIZE..];
