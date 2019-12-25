@@ -234,6 +234,8 @@ fn aes_decrypt(src: &[u8], dst: &mut [u8], key: &mut AesKey) {
     unimplemented!()
 }
 
+use std::convert::TryInto;
+
 fn ocb_encrypt(encrypt_key: &mut AesKey, mut plain: &[u8], mut encrypted: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
     assert_eq!(plain.len(), encrypted.len());
     let mut len = plain.len();
@@ -248,10 +250,10 @@ fn ocb_encrypt(encrypt_key: &mut AesKey, mut plain: &[u8], mut encrypted: &mut [
 
     while len > AES_BLOCK_SIZE {
         s2(&mut delta);
-        xor(&mut tmp, &delta, plain);
+        xor(&mut tmp, &delta, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
         aes_encrypt(&tmp, &mut tmp, encrypt_key);
-        xor(encrypted, &delta, &tmp);
-        xor(&mut checksum, &checksum, plain);
+        xor((&mut encrypted[..AES_BLOCK_SIZE]).try_into().unwrap(), &delta, &tmp);
+        xor(&mut checksum, &checksum, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
         len -= AES_BLOCK_SIZE;
         plain = &plain[AES_BLOCK_SIZE..];
         encrypted = &mut encrypted[AES_BLOCK_SIZE..];
@@ -287,10 +289,10 @@ fn ocb_decrypt(encrypt_key: &mut AesKey, decrypt_key: &mut AesKey, encrypted: &[
 
     while len > AES_BLOCK_SIZE {
         s2(&mut delta);
-        xor(&mut tmp, &delta, encrypted);
+        xor(&mut tmp, &delta, (&encrypted[..AES_BLOCK_SIZE]).try_into().unwrap());
         aes_decrypt(&tmp, &mut tmp, decrypt_key);
-        xor(&mut plain, &delta, &tmp);
-        xor(&mut checksum, &checksum, plain);
+        xor((&mut plain[..AES_BLOCK_SIZE]).try_into().unwrap(), &delta, &tmp);
+        xor(&mut checksum, &checksum, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
         len -= AES_BLOCK_SIZE;
         plain = &mut plain[AES_BLOCK_SIZE..];
         encrypted = &encrypted[AES_BLOCK_SIZE..];
