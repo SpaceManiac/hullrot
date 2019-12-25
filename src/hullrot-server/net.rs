@@ -195,7 +195,7 @@ pub fn server_thread(init: Init, config: &Config) {
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
                         Err(e) => { println!("{:?}", e); continue },
                     };
-                    if !is_loopback(&remote) {
+                    if !remote.ip().is_loopback() {
                         println!("CONTROL: {} rejected", remote);
                     }
                     if let Some(old) = control_client.take() {
@@ -464,13 +464,6 @@ pub fn server_thread(init: Init, config: &Config) {
                 break
             }
         }
-    }
-}
-
-pub fn is_loopback(remote: &SocketAddr) -> bool {
-    match *remote {
-        SocketAddr::V4(v4) => v4.ip().is_loopback(),
-        SocketAddr::V6(v6) => v6.ip().is_loopback(),
     }
 }
 
