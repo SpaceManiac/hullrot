@@ -48,6 +48,12 @@ pub struct CryptState {
     decrypt_key: AesKey,
 }
 
+impl std::fmt::Debug for CryptState {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fmt.write_str("CryptState")
+    }
+}
+
 impl CryptState {
     pub fn generate() -> CryptState {
         let mut raw_key = [0; AES_KEY_SIZE_BYTES];
@@ -71,6 +77,14 @@ impl CryptState {
 
     pub fn from_parameters(rkey: &[u8], eiv: &[u8], div: &[u8]) -> CryptState {
         unimplemented!()
+    }
+
+    pub fn to_parameters(&self) -> mumble_protocol::CryptSetup {
+        packet! { CryptSetup;
+            set_key: self.raw_key.to_vec(),
+            set_client_nonce: self.decrypt_iv.to_vec(),
+            set_server_nonce: self.encrypt_iv.to_vec(),
+        }
     }
 
     pub fn encrypt(&mut self, source: &[u8], dst: &mut [u8]) {
