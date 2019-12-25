@@ -33,10 +33,12 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 
 #![allow(dead_code, unused_variables, unused_mut)]  // TODO
 
+use openssl::symm;
+
 const AES_KEY_SIZE_BYTES: usize = 16;
 const AES_BLOCK_SIZE: usize = 16;
 
-type AesKey = ();
+type AesKey = symm::Crypter;
 
 pub struct CryptState {
     raw_key: [u8; AES_KEY_SIZE_BYTES],
@@ -64,14 +66,19 @@ impl CryptState {
         openssl::rand::rand_bytes(&mut encrypt_iv).expect("rand_bytes failed");
         openssl::rand::rand_bytes(&mut decrypt_iv).expect("rand_bytes failed");
 
+        let cipher = symm::Cipher::aes_128_ecb();
+        println!("block size = {}", cipher.block_size());
+        let encrypt_key = symm::Crypter::new(cipher, symm::Mode::Encrypt, &raw_key, None).unwrap();
+        let decrypt_key = symm::Crypter::new(cipher, symm::Mode::Decrypt, &raw_key, None).unwrap();
+
         CryptState {
             raw_key,
             encrypt_iv,
             decrypt_iv,
             decrypt_history: [0; 0x100],
 
-            encrypt_key: (),
-            decrypt_key: (),
+            encrypt_key,
+            decrypt_key,
         }
     }
 
@@ -234,11 +241,13 @@ fn zero<T: Default>(block: &mut [T]) {
 }
 
 fn aes_encrypt(src: &[u8], dst: &mut [u8], key: &mut AesKey) {
-    unimplemented!()
+    let mut dst2 = [0; 2 * AES_BLOCK_SIZE];
+    let len = key.update(src, &mut dst2).unwrap();
+    dst.copy_from_slice(&dst2[..len]);
 }
 
 fn aes_decrypt(src: &[u8], dst: &mut [u8], key: &mut AesKey) {
-    unimplemented!()
+    aes_encrypt(src, dst, key)
 }
 
 use std::convert::TryInto;
