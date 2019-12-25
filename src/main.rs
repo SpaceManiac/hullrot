@@ -550,7 +550,7 @@ impl<'cfg> Client<'cfg> {
                             heard = true;
                         }
                         if heard && (other.known_languages.contains(&self.current_language) || other.ghost()) {
-                            other.sender.send_voice(self.session, seq, audio.to_owned());
+                            other.sender.send_voice(self.session, seq, audio.clone());
                         }
                     });
 
