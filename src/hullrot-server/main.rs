@@ -38,6 +38,7 @@ macro_rules! packet {
 pub mod net;
 mod deser;
 mod config;
+mod udpcrypt;
 
 use std::mem::replace;
 use std::collections::{VecDeque, HashMap, HashSet};
