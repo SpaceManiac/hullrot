@@ -17,6 +17,9 @@ pub extern crate protobuf;
 extern crate byteorder;
 #[macro_use] extern crate bitflags;
 
+use byteorder::{BigEndian, WriteBytesExt};
+use protobuf::Message;
+
 pub const PROTOCOL_LICENSE: &str = include_str!("Mumble.proto.LICENSE");
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
@@ -37,19 +40,22 @@ macro_rules! packets {
                 }
             }
 
-            pub fn encode(&self) -> protobuf::ProtobufResult<Vec<u8>> {
-                use byteorder::{BigEndian, WriteBytesExt};
-                use protobuf::Message;
+            pub fn compute_size(&self) -> usize {
+                6 + match *self {
+                    $(Packet::$name(ref inner) => inner.compute_size(),)*
+                } as usize
+            }
 
-                let mut result = Vec::new();
+            pub fn encode(&self, mut buf: &mut [u8]) -> protobuf::ProtobufResult<usize> {
+                let start_len = buf.len();
                 match *self {
                     $(Packet::$name(ref inner) => {
-                        result.write_u16::<BigEndian>($num)?;
-                        result.write_u32::<BigEndian>(inner.compute_size())?;
-                        inner.write_to_vec(&mut result)?;
+                        buf.write_u16::<BigEndian>($num)?;
+                        buf.write_u32::<BigEndian>(inner.compute_size())?;
+                        inner.write_to_writer(&mut buf)?;
                     })*
                 }
-                Ok(result)
+                Ok(start_len - buf.len())
             }
         }
 

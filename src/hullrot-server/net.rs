@@ -150,6 +150,7 @@ fn create_self_signed_cert(cert_pem: &str, key_pem: &str) -> Result<(), Box<dyn 
 
 pub fn server_thread(init: Init, config: &Config) {
     let Init { ctx, poll, server, control_server, udp } = init;
+    let mut encode_buf = vec![0u8; 1024]; // Docs say this could go up to 0x7fffff (8MiB - 1B) in size
     let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit
     let mut udp_writeable = true;
     let mut udp_out_queue = VecDeque::new();
@@ -379,15 +380,17 @@ pub fn server_thread(init: Init, config: &Config) {
                     } else if let Ok(command) = connection.write_rx.try_recv() {
                         match command {
                             OutCommand::Packet(packet) => {
-                                match packet {
-                                    Packet::Ping(_) => {}
-                                    _ => {} //println!("OUT: {:?}", packet)
+                                let len = packet.compute_size();
+                                if len > encode_buf.len() {
+                                    encode_buf.resize(len, 0);
                                 }
-                                let encoded = match packet.encode() {
-                                    Ok(v) => v,
-                                    Err(e) => { connection.client.kick(format!("Encode error: {}", e)); break }
-                                };
-                                match connection.write_buf.with(stream).write_all(&encoded) {
+
+                                if let Err(e) = packet.encode(&mut encode_buf[..len]) {
+                                    connection.client.kick(format!("Encode error: {}", e));
+                                    break;
+                                }
+
+                                match connection.write_buf.with(stream).write_all(&encode_buf[..len]) {
                                     Ok(()) => {}
                                     Err(e) => { io_error(&mut connection.client, e); break }
                                 }
