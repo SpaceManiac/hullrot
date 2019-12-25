@@ -480,8 +480,8 @@ impl<'cfg> Client<'cfg> {
                         set_message_length: 2000,
                         set_image_message_length: 131072,
                         set_max_users: 100,
-                        set_welcome_text: r#"Hullrot is <a href="https://github.com/SpaceManiac/hullrot/">free software</a> \
-                            available under the GNU Affero General Public License."#.to_owned(),
+                        set_welcome_text: "Hullrot is <a href=\"https://github.com/SpaceManiac/hullrot/\">free software</a> \
+                            available under the GNU Affero General Public License.".to_owned(),
                     });
                 },
                 Command::Packet(Packet::UserState(ref state)) => {
