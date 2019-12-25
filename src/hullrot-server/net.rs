@@ -19,6 +19,7 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 use std::io::{self, Read, Write, BufRead};
 use std::net::SocketAddr;
 use std::sync::mpsc;
+use std::rc::Rc;
 use std::collections::{HashMap, VecDeque};
 use std::mem;
 use std::fs;
@@ -489,7 +490,7 @@ pub enum Command {
     Packet(Packet),
     VoiceData {
         seq: i64,
-        audio: Vec<Sample>,
+        audio: Rc<[Sample]>,
         end: bool,
     },
 }
@@ -503,7 +504,7 @@ pub enum OutCommand {
     VoiceData {
         who: u32,
         seq: i64,
-        audio: Vec<Sample>,
+        audio: Rc<[Sample]>,
         end: bool,
     },
 }
@@ -515,7 +516,7 @@ impl PacketChannel {
     }
 
     #[inline]
-    pub fn send_voice(&self, who: u32, seq: i64, audio: Vec<Sample>) -> bool {
+    pub fn send_voice(&self, who: u32, seq: i64, audio: Rc<[Sample]>) -> bool {
         self.0.send(OutCommand::VoiceData { who, seq, audio, end: false }).is_ok()
     }
 }
@@ -708,7 +709,7 @@ fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder) -> 
 
     client.events.push_back(Command::VoiceData {
         seq: sequence_number,
-        audio: output[..len].to_owned(),
+        audio: Rc::from(&output[..len]),
         end: terminator,
     });
     Ok(())

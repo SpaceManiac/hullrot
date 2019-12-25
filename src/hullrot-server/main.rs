@@ -640,7 +640,7 @@ impl<'cfg> Client<'cfg> {
                         // no server connection or pre/post-game
                         others.for_each(|other| {
                             if other.self_deaf { return }
-                            other.sender.send_voice(self.session, seq, audio.to_owned());
+                            other.sender.send_voice(self.session, seq, audio.clone());
                         });
                         self.unspeak(server);
                         continue;
