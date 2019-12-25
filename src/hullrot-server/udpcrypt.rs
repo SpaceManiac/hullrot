@@ -132,7 +132,7 @@ impl CryptState {
             unimplemented!();
         }
 
-        ocb_decrypt(&mut self.decrypt_key, &source[4..], dst, &self.decrypt_iv, &mut tag);
+        ocb_decrypt(&mut self.encrypt_key, &mut self.decrypt_key, &source[4..], dst, &self.decrypt_iv, &mut tag);
 
         if &tag[..3] != &source[1..4] {
             self.decrypt_iv.copy_from_slice(&saveiv);
@@ -228,10 +228,75 @@ fn aes_decrypt(src: &[u8], dst: &mut [u8], key: &mut AesKey) {
     unimplemented!()
 }
 
-fn ocb_encrypt(key: &mut AesKey, plain: &[u8], encrypted: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
-    unimplemented!()
+fn ocb_encrypt(encrypt_key: &mut AesKey, mut plain: &[u8], mut encrypted: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
+    assert_eq!(plain.len(), encrypted.len());
+    let mut len = plain.len();
+
+    let mut delta_bytes = [0; AES_BLOCK_SIZE];
+    // Initialize
+    aes_encrypt(nonce, &mut delta_bytes, encrypt_key);
+    let mut checksum = [0; AES_BLOCK_SIZE];
+
+    while len > AES_BLOCK_SIZE {
+        s2(delta);
+        xor(tmp, delta, reinterpret_cast<const subblock *>(plain));
+        aes_encrypt(tmp, tmp, encrypt_key);
+        xor(reinterpret_cast<subblock *>(encrypted), delta, tmp);
+        xor(checksum, checksum, reinterpret_cast<const subblock *>(plain));
+        len -= AES_BLOCK_SIZE;
+        plain = &plain[AES_BLOCK_SIZE..];
+        encrypted = &mut encrypted[AES_BLOCK_SIZE..];
+    }
+
+    s2(delta);
+    zero(tmp);
+    tmp[BLOCKSIZE - 1] = swapped((len * 8) as Subblock);
+    xor(tmp, tmp, delta);
+    aes_encrypt(tmp, pad, encrypt_key);
+    tmp[..len].copy_from_slice(plain);
+    memcpy(reinterpret_cast<unsigned char *>(tmp)+len, reinterpret_cast<const unsigned char *>(pad)+len, AES_BLOCK_SIZE - len);
+    xor(checksum, checksum, tmp);
+    xor(tmp, pad, tmp);
+    encrypted[..len].copy_from_slice(tmp[..len]);
+
+    s3(delta);
+    xor(tmp, delta, checksum);
+    aes_encrypt(tmp, tag, encrypt_key);
 }
 
-fn ocb_decrypt(key: &mut AesKey, encrypted: &[u8], plain: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
-    unimplemented!()
+fn ocb_decrypt(encrypt_key: &mut AesKey, decrypt_key: &mut AesKey, encrypted: &[u8], plain: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
+    assert_eq!(plain.len(), encrypted.len());
+    let mut len = plain.len();
+
+    let (checksum, delta, tmp, pad);
+
+    // Initialize
+    aes_encrypt(nonce, delta, encrypt_key);
+    zero(checksum);
+
+    while len > AES_BLOCK_SIZE {
+        s2(delta);
+        xor(tmp, delta, reinterpret_cast<const subblock *>(encrypted));
+        aes_decrypt(tmp, tmp, &decrypt_key);
+        xor(reinterpret_cast<subblock *>(plain), delta, tmp);
+        xor(checksum, checksum, reinterpret_cast<const subblock *>(plain));
+        len -= AES_BLOCK_SIZE;
+        plain = &mut plain[AES_BLOCK_SIZE..];
+        encrypted = &encrypted[AES_BLOCK_SIZE..];
+    }
+
+    s2(delta);
+    zero(tmp);
+    tmp[BLOCKSIZE - 1] = swapped((len * 8) as Subblock);
+    xor(tmp, tmp, delta);
+    aes_encrypt(tmp, pad, encrypt_key);
+    memset(tmp, 0, AES_BLOCK_SIZE);
+    memcpy(tmp, encrypted, len);
+    xor(tmp, tmp, pad);
+    xor(checksum, checksum, tmp);
+    memcpy(plain, tmp, len);
+
+    s3(delta);
+    xor(tmp, delta, checksum);
+    aes_encrypt(tmp, tag, encrypt_key);
 }
