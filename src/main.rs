@@ -329,7 +329,7 @@ impl<'cfg> Client<'cfg> {
             set_os_version: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         });
 
-        let admin = net::is_loopback(&remote);
+        let admin = remote.ip().is_loopback();
 
         Client {
             config,
