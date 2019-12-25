@@ -36,11 +36,16 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 const AES_KEY_SIZE_BYTES: usize = 16;
 const AES_BLOCK_SIZE: usize = 16;
 
+type AesKey = ();
+
 pub struct CryptState {
     raw_key: [u8; AES_KEY_SIZE_BYTES],
     encrypt_iv: [u8; AES_BLOCK_SIZE],
     decrypt_iv: [u8; AES_BLOCK_SIZE],
     decrypt_history: [u8; 0x100],
+
+    encrypt_key: AesKey,
+    decrypt_key: AesKey,
 }
 
 impl CryptState {
@@ -58,6 +63,9 @@ impl CryptState {
             encrypt_iv,
             decrypt_iv,
             decrypt_history: [0; 0x100],
+
+            encrypt_key: (),
+            decrypt_key: (),
         }
     }
 
@@ -65,7 +73,21 @@ impl CryptState {
         unimplemented!()
     }
 
-    fn decrypt(&mut self, source: &[u8], dst: &mut [u8]) -> bool {
+    pub fn encrypt(&mut self, source: &[u8], dst: &mut [u8]) {
+        let mut tag = [0; AES_BLOCK_SIZE];
+
+        // First, increase our IV.
+        increment_iv(&mut self.encrypt_iv);
+
+        ocb_encrypt(&mut self.encrypt_key, source, &mut dst[4..], &self.encrypt_iv, &mut tag);
+
+        dst[0] = self.encrypt_iv[0];
+        dst[1] = tag[0];
+        dst[2] = tag[1];
+        dst[3] = tag[2];
+    }
+
+    pub fn decrypt(&mut self, source: &[u8], dst: &mut [u8]) -> bool {
         if source.len() < 4 {
             return false;
         }
@@ -96,7 +118,24 @@ impl CryptState {
             unimplemented!();
         }
 
-        unimplemented!()
+        ocb_decrypt(&mut self.decrypt_key, &source[4..], dst, &self.decrypt_iv, &mut tag);
+
+        if &tag[..3] != &source[1..4] {
+            self.decrypt_iv.copy_from_slice(&saveiv);
+            return false;
+        }
+        self.decrypt_history[self.decrypt_iv[0] as usize] = self.decrypt_iv[1];
+
+        if restore {
+            self.decrypt_iv.copy_from_slice(&saveiv);
+        }
+
+        // uiGood++;
+        // uiLate += late;
+        // uiLost += lost;
+
+        // tLastGood.restart();
+        true
     }
 }
 
@@ -167,10 +206,18 @@ fn zero(block: &mut Keyblock) {
     }
 }
 
-fn ocb_encrypt(plain: &[u8], encrypted: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
+fn aes_encrypt(src: &[u8], dst: &mut [u8], key: &mut AesKey) {
     unimplemented!()
 }
 
-fn ocb_decrypt(encrypted: &[u8], plain: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
+fn aes_decrypt(src: &[u8], dst: &mut [u8], key: &mut AesKey) {
+    unimplemented!()
+}
+
+fn ocb_encrypt(key: &mut AesKey, plain: &[u8], encrypted: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
+    unimplemented!()
+}
+
+fn ocb_decrypt(key: &mut AesKey, encrypted: &[u8], plain: &mut [u8], nonce: &[u8], tag: &mut [u8]) {
     unimplemented!()
 }
