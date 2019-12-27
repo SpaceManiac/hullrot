@@ -429,42 +429,72 @@ pub fn server_thread(init: Init, config: &Config) {
                             },
                             OutCommand::VoiceData { who, seq, audio, end } => {
                                 // Encode the audio
-                                let len = connection.encoders.entry(who)
-                                    .or_insert_with(|| {
-                                        let mut encoder = Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION).unwrap();
-                                        encoder.set_bitrate(BITRATE).unwrap();
-                                        encoder.set_vbr(false).unwrap();
-                                        encoder
-                                    })
-                                    .encode(&audio, &mut udp_buf).unwrap();
+                                let audio = {
+                                    let len = connection.encoders.entry(who)
+                                        .or_insert_with(|| {
+                                            let mut encoder = Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION).unwrap();
+                                            encoder.set_bitrate(BITRATE).unwrap();
+                                            encoder.set_vbr(false).unwrap();
+                                            encoder
+                                        })
+                                        .encode(&audio, &mut udp_crypt_buf).unwrap();
+                                    &udp_crypt_buf[..len]
+                                };
 
-                                // Construct the UDPTunnel packet
-                                let mut encoded = Vec::new();
-                                let _ = encoded.write_u16::<BigEndian>(1);  // UDP tunnel
-                                let _ = encoded.write_u32::<BigEndian>(0);  // Placeholder for length
+                                // Prepare the UDP header
+                                let datagram = encode(&mut udp_buf, |encoded| {
+                                    let _ = encoded.write_u8(128);  // header byte, opus on normal channel
+                                    let _ = write_varint(encoded, who as i64);  // session of source user
+                                    let _ = write_varint(encoded, seq);  // sequence number
+                                    let _ = write_varint(encoded, (audio.len() | if end { 0x2000 } else { 0 }) as i64);  // opus header
+                                    encoded.write_all(&audio).unwrap();
+                                });
 
-                                // Construct the voice datagram
-                                let start = encoded.len();
-                                let _ = encoded.write_u8(128);  // header byte, opus on normal channel
-                                let _ = write_varint(&mut encoded, who as i64);  // session of source user
-                                let _ = write_varint(&mut encoded, seq);  // sequence number
-                                let _ = write_varint(&mut encoded, (len | if end { 0x2000 } else { 0 }) as i64);  // opus header
-                                let total_len = encoded.len() + len - start;
-                                let _ = (&mut encoded[2..6]).write_u32::<BigEndian>(total_len as u32);
-
-                                //println!("OUT: voice: who={} seq={} audio={} tiny={} big={} end={}", who, seq, audio.len(), len, total_len, end);
-
+                                // Outside the closure for borrow coherency
                                 let mut out = connection.write_buf.with(stream);
-                                match (|| {
-                                    out.write_all(&encoded)?;
-                                    out.write_all(&udp_buf[..len])
+                                let udp_remote = connection.udp_remote.as_ref();
+                                let udp_valid = connection.client.udp_valid;
+
+                                if let Err(e) = (|| {
+                                    // Check if we're good to transmit over UDP
+                                    if let Some(remote) = udp_remote {
+                                        if udp_valid {
+                                            udp.send_to(datagram, remote)?;
+                                            return Ok(());
+                                        }
+                                    }
+
+                                    // Construct the UDPTunnel header
+                                    let mut tunnel_buf = [0; 6];
+                                    let tunnel_header = encode(&mut tunnel_buf, |header| {
+                                        let _ = header.write_u16::<BigEndian>(1);  // UDP tunnel
+                                        let _ = header.write_u32::<BigEndian>(datagram.len() as u32);  // Length
+                                    });
+
+                                    out.write_all(&tunnel_header)?;
+                                    out.write_all(&datagram)?;
+                                    Ok(())
                                 })() {
-                                    Ok(()) => {}
-                                    Err(e) => { io_error(&mut connection.client, e); break }
+                                    io_error(&mut connection.client, e);
+                                    break;
                                 }
                             },
-                            OutCommand::VoicePing(_) => {
-                                // TODO
+                            OutCommand::VoicePing(timestamp) => {
+                                // Construct the voice datagram
+                                let encoded = encode(&mut udp_buf, |out| {
+                                    let _ = out.write_u8(32);  // header byte, ping
+                                    let _ = write_varint(out, timestamp);
+                                });
+
+                                // Check if we're good to transmit over UDP
+                                if let Some(remote) = connection.udp_remote.as_ref() {
+                                    if let Err(e) = udp.send_to(encoded, remote) {
+                                        io_error(&mut connection.client, e);
+                                        break;
+                                    }
+                                }
+
+                                // No sense tunneling these
                             },
                         }
                     } else {
@@ -653,6 +683,16 @@ impl<'a, 'b, 'cfg> Everyone<'a, 'b, 'cfg> {
     pub fn reborrow<'c>(&'c mut self) -> Everyone<'c, 'b, 'cfg> {
         Everyone(self.0, self.1)
     }
+}
+
+fn encode<F: FnOnce(&mut &mut [u8])>(buffer: &mut [u8], f: F) -> &mut [u8] {
+    let remaining = {
+        let mut buf2 = &mut *buffer;
+        f(&mut buf2);
+        buf2.len()
+    };
+    let written = buffer.len() - remaining;
+    &mut buffer[..written]
 }
 
 // ----------------------------------------------------------------------------
