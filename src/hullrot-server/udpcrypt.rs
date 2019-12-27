@@ -46,7 +46,6 @@ pub struct CryptState {
     decrypt_history: [u8; 0x100],
 
     encrypt_key: AesKey,
-    decrypt_key: AesKey,
 
     ui_good: u32,
     ui_late: u32,
@@ -75,7 +74,6 @@ impl CryptState {
     fn from_parameters(raw_key: [u8; AES_KEY_SIZE_BYTES], encrypt_iv: [u8; AES_BLOCK_SIZE], decrypt_iv: [u8; AES_BLOCK_SIZE]) -> CryptState {
         let cipher = symm::Cipher::aes_128_ecb();
         let encrypt_key = symm::Crypter::new(cipher, symm::Mode::Encrypt, &raw_key, None).unwrap();
-        let decrypt_key = symm::Crypter::new(cipher, symm::Mode::Decrypt, &raw_key, None).unwrap();
 
         CryptState {
             raw_key,
@@ -84,7 +82,6 @@ impl CryptState {
             decrypt_history: [0; 0x100],
 
             encrypt_key,
-            decrypt_key,
 
             ui_good: 0,
             ui_late: 0,
@@ -184,7 +181,7 @@ impl CryptState {
         }
 
         let sliced_dst = &mut dst[..source.len() - 4];
-        ocb_decrypt(&mut self.encrypt_key, &mut self.decrypt_key, &source[4..], sliced_dst, &self.decrypt_iv, &mut tag);
+        ocb_decrypt(&mut self.encrypt_key, &self.raw_key, &source[4..], sliced_dst, &self.decrypt_iv, &mut tag);
 
         if &tag[..3] != &source[1..4] {
             self.decrypt_iv.copy_from_slice(&saveiv);
@@ -296,8 +293,8 @@ fn zero<T: Default>(block: &mut [T]) {
 
 fn aes_encrypt(src: &Keyblock, dst: &mut Keyblock, key: &mut AesKey) {
     let mut dst2 = [0; 2 * AES_BLOCK_SIZE];
-    let len = key.update(src, &mut dst2).unwrap();
-    dst.copy_from_slice(&dst2[..len]);
+    key.update(src, &mut dst2).unwrap();
+    dst.copy_from_slice(&dst2[..AES_BLOCK_SIZE]);
 }
 
 fn aes_decrypt(src: &Keyblock, dst: &mut Keyblock, key: &mut AesKey) {
@@ -345,7 +342,7 @@ fn ocb_encrypt(encrypt_key: &mut AesKey, mut plain: &[u8], mut encrypted: &mut [
     aes_encrypt(&tmp, tag, encrypt_key);
 }
 
-fn ocb_decrypt(encrypt_key: &mut AesKey, decrypt_key: &mut AesKey, mut encrypted: &[u8], mut plain: &mut [u8], nonce: &Keyblock, tag: &mut Keyblock) {
+fn ocb_decrypt(encrypt_key: &mut AesKey, raw_key: &Keyblock, mut encrypted: &[u8], mut plain: &mut [u8], nonce: &Keyblock, tag: &mut Keyblock) {
     assert_eq!(plain.len(), encrypted.len());
     let mut len = plain.len();
 
@@ -360,7 +357,8 @@ fn ocb_decrypt(encrypt_key: &mut AesKey, decrypt_key: &mut AesKey, mut encrypted
     while len > AES_BLOCK_SIZE {
         s2(&mut delta);
         xor(&mut tmp, &delta, (&encrypted[..AES_BLOCK_SIZE]).try_into().unwrap());
-        aes_decrypt(&tmp, &mut pad, decrypt_key);
+        let mut decrypt_key = symm::Crypter::new(symm::Cipher::aes_128_ecb(), symm::Mode::Decrypt, raw_key, None).unwrap();
+        aes_decrypt(&tmp, &mut pad, &mut decrypt_key);
         xor((&mut plain[..AES_BLOCK_SIZE]).try_into().unwrap(), &delta, &pad);
         xor_self(&mut checksum, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
         len -= AES_BLOCK_SIZE;
@@ -400,7 +398,7 @@ fn authcrypt() {
         let mut decrypted = vec![0; len];
 
         ocb_encrypt(&mut cs.encrypt_key, &src, &mut encrypted, &NONCE, &mut enctag);
-        ocb_decrypt(&mut cs.encrypt_key, &mut cs.decrypt_key, &encrypted, &mut decrypted, &NONCE, &mut dectag);
+        ocb_decrypt(&mut cs.encrypt_key, &RAWKEY, &encrypted, &mut decrypted, &NONCE, &mut dectag);
 
         assert_eq!(enctag, dectag);
         assert_eq!(src, decrypted);
