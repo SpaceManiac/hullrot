@@ -89,18 +89,19 @@ impl CryptState {
         }
     }
 
-    pub fn encrypt(&mut self, source: &[u8], dst: &mut [u8]) {
+    pub fn encrypt<'d>(&mut self, source: &[u8], dst: &'d mut [u8]) -> &'d mut [u8] {
         let mut tag = [0; AES_BLOCK_SIZE];
 
         // First, increase our IV.
         increment_iv(&mut self.encrypt_iv);
 
-        ocb_encrypt(&mut self.encrypt_key, source, &mut dst[4..], &self.encrypt_iv, &mut tag);
+        ocb_encrypt(&mut self.encrypt_key, source, &mut dst[4..4 + source.len()], &self.encrypt_iv, &mut tag);
 
         dst[0] = self.encrypt_iv[0];
         dst[1] = tag[0];
         dst[2] = tag[1];
         dst[3] = tag[2];
+        &mut dst[..4 + source.len()]
     }
 
     pub fn decrypt(&mut self, source: &[u8], dst: &mut [u8]) -> bool {

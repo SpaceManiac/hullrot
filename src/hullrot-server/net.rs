@@ -441,7 +441,7 @@ pub fn server_thread(init: Init, config: &Config) {
                                     &udp_crypt_buf[..len]
                                 };
 
-                                // Prepare the UDP header
+                                // Prepare the unencrypted datagram
                                 let datagram = encode(&mut udp_buf, |encoded| {
                                     let _ = encoded.write_u8(128);  // header byte, opus on normal channel
                                     let _ = write_varint(encoded, who as i64);  // session of source user
@@ -454,13 +454,16 @@ pub fn server_thread(init: Init, config: &Config) {
                                 let mut out = connection.write_buf.with(stream);
                                 let udp_remote = connection.udp_remote.as_ref();
                                 let udp_valid = connection.client.udp_valid;
+                                let crypt = connection.client.crypt_state.as_mut();
 
                                 if let Err(e) = (|| {
                                     // Check if we're good to transmit over UDP
-                                    if let Some(remote) = udp_remote {
-                                        if udp_valid {
-                                            udp.send_to(datagram, remote)?;
-                                            return Ok(());
+                                    if udp_valid {
+                                        if let Some(remote) = udp_remote {
+                                            if let Some(crypt) = crypt {
+                                                udp.send_to(crypt.encrypt(&datagram, &mut udp_crypt_buf), remote)?;
+                                                return Ok(());
+                                            }
                                         }
                                     }
 
@@ -480,17 +483,19 @@ pub fn server_thread(init: Init, config: &Config) {
                                 }
                             },
                             OutCommand::VoicePing(timestamp) => {
-                                // Construct the voice datagram
-                                let encoded = encode(&mut udp_buf, |out| {
+                                // Construct the ping datagram
+                                let datagram = encode(&mut udp_buf, |out| {
                                     let _ = out.write_u8(32);  // header byte, ping
                                     let _ = write_varint(out, timestamp);
                                 });
 
                                 // Check if we're good to transmit over UDP
                                 if let Some(remote) = connection.udp_remote.as_ref() {
-                                    if let Err(e) = udp.send_to(encoded, remote) {
-                                        io_error(&mut connection.client, e);
-                                        break;
+                                    if let Some(crypt) = connection.client.crypt_state.as_mut() {
+                                        if let Err(e) = udp.send_to(crypt.encrypt(&datagram, &mut udp_crypt_buf), remote) {
+                                            io_error(&mut connection.client, e);
+                                            break;
+                                        }
                                     }
                                 }
 
