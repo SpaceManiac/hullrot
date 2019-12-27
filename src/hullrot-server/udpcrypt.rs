@@ -16,6 +16,7 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 // Rust implementation of Mumble's UDP crypto. Based on CryptState:
 // https://github.com/mumble-voip/mumble/blob/0da917b892b5300f24ebc4607f1517f76a22766f/src/CryptState.h
 // https://github.com/mumble-voip/mumble/blob/0da917b892b5300f24ebc4607f1517f76a22766f/src/CryptState.cpp
+// https://github.com/mumble-voip/mumble/blob/0da917b892b5300f24ebc4607f1517f76a22766f/src/tests/TestCrypt/TestCrypt.cpp
 
 // Copyright 2005-2019 The Mumble Developers. All rights reserved.
 // Use of this source code is governed by a BSD-style license
@@ -68,6 +69,10 @@ impl CryptState {
         openssl::rand::rand_bytes(&mut encrypt_iv).expect("rand_bytes failed");
         openssl::rand::rand_bytes(&mut decrypt_iv).expect("rand_bytes failed");
 
+        CryptState::from_parameters(raw_key, encrypt_iv, decrypt_iv)
+    }
+
+    fn from_parameters(raw_key: [u8; AES_KEY_SIZE_BYTES], encrypt_iv: [u8; AES_BLOCK_SIZE], decrypt_iv: [u8; AES_BLOCK_SIZE]) -> CryptState {
         let cipher = symm::Cipher::aes_128_ecb();
         let encrypt_key = symm::Crypter::new(cipher, symm::Mode::Encrypt, &raw_key, None).unwrap();
         let decrypt_key = symm::Crypter::new(cipher, symm::Mode::Decrypt, &raw_key, None).unwrap();
@@ -86,8 +91,6 @@ impl CryptState {
             ui_lost: 0,
         }
     }
-
-    //pub fn from_parameters(rkey: &[u8], eiv: &[u8], div: &[u8]) -> CryptState;
 
     pub fn to_parameters(&self) -> mumble_protocol::CryptSetup {
         packet! { CryptSetup;
@@ -379,4 +382,27 @@ fn ocb_decrypt(encrypt_key: &mut AesKey, decrypt_key: &mut AesKey, mut encrypted
     s3(&mut delta);
     xor(&mut tmp, &delta, &checksum);
     aes_encrypt(&tmp, tag, encrypt_key);
+}
+
+#[test]
+fn authcrypt() {
+    for len in 0..128 {
+        const RAWKEY: [u8; AES_BLOCK_SIZE] = [0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f];
+        const NONCE: [u8; AES_BLOCK_SIZE] = [0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00];
+
+        let mut cs = CryptState::from_parameters(RAWKEY, NONCE, NONCE);
+
+        let src: Vec<u8> = (1..len as u8+1).collect();
+
+        let mut enctag = [0; AES_BLOCK_SIZE];
+        let mut dectag = [0; AES_BLOCK_SIZE];
+        let mut encrypted = vec![0; len];
+        let mut decrypted = vec![0; len];
+
+        ocb_encrypt(&mut cs.encrypt_key, &src, &mut encrypted, &NONCE, &mut enctag);
+        ocb_decrypt(&mut cs.encrypt_key, &mut cs.decrypt_key, &encrypted, &mut decrypted, &NONCE, &mut dectag);
+
+        assert_eq!(enctag, dectag);
+        assert_eq!(src, decrypted);
+    }
 }
