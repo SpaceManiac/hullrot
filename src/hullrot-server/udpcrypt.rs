@@ -31,8 +31,6 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
  * OCB with something else or get yourself a license.
  */
 
-#![allow(dead_code, unused_variables, unused_mut)]  // TODO
-
 use openssl::symm;
 
 const AES_KEY_SIZE_BYTES: usize = 16;
@@ -82,9 +80,7 @@ impl CryptState {
         }
     }
 
-    pub fn from_parameters(rkey: &[u8], eiv: &[u8], div: &[u8]) -> CryptState {
-        unimplemented!()
-    }
+    //pub fn from_parameters(rkey: &[u8], eiv: &[u8], div: &[u8]) -> CryptState;
 
     pub fn to_parameters(&self) -> mumble_protocol::CryptSetup {
         packet! { CryptSetup;
@@ -113,14 +109,10 @@ impl CryptState {
             return false;
         }
 
-        let plain_length = source.len() - 4;
         let mut saveiv = [0u8; AES_BLOCK_SIZE];
         let ivbyte = source[0];
         let mut restore = false;
         let mut tag = [0u8; AES_KEY_SIZE_BYTES];
-
-        let mut lost = 0;
-        let mut late = 0;
 
         saveiv.copy_from_slice(&self.decrypt_iv);
 
@@ -136,7 +128,34 @@ impl CryptState {
             }
         } else {
             // This is either out of order or a repeat.
-            unimplemented!();
+
+            let diff = ivbyte.wrapping_sub(self.decrypt_iv[0]) as i8;
+
+            if ivbyte < self.decrypt_iv[0] && diff > -30 && diff < 0 {
+                // Late packet, but no wraparound.
+                //late = 1;
+                //lost = -1;
+                self.decrypt_iv[0] = ivbyte;
+                restore = true;
+            } else if ivbyte > self.decrypt_iv[0] && diff > -30 && diff < 0 {
+                // Last was 0x02, here comes 0xff from last round
+                //late = 1;
+                //lost = -1;
+                self.decrypt_iv[0] = ivbyte;
+                decrement_iv(&mut self.decrypt_iv[1..]);
+                restore = true;
+            } else if ivbyte > self.decrypt_iv[0] && diff > 0 {
+                // Lost a few packets, but beyond that we're good.
+                //lost = (ivbyte as i32).wrapping_sub(self.decrypt_iv[0] as i32).wrapping_sub(1);
+                self.decrypt_iv[0] = ivbyte;
+            } else if ivbyte < self.decrypt_iv[0] && diff > 0 {
+                // Lost a few packets, and wrapped around.
+                //lost = 255i32.wrapping_sub(self.decrypt_iv[0] as i32).wrapping_add(ivbyte as i32);
+                self.decrypt_iv[0] = ivbyte;
+                increment_iv(&mut self.decrypt_iv[1..]);
+            } else {
+                return false;
+            }
         }
 
         ocb_decrypt(&mut self.encrypt_key, &mut self.decrypt_key, &source[4..], dst, &self.decrypt_iv, &mut tag);
@@ -164,6 +183,15 @@ fn increment_iv(iv: &mut [u8]) {
     for each in iv.iter_mut() {
         match each.checked_add(1) {
             None => *each = 0,
+            Some(x) => { *each = x; break; }
+        }
+    }
+}
+
+fn decrement_iv(iv: &mut [u8]) {
+    for each in iv.iter_mut() {
+        match each.checked_sub(1) {
+            None => *each = 255,
             Some(x) => { *each = x; break; }
         }
     }

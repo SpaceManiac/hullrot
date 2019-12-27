@@ -157,6 +157,7 @@ pub fn server_thread(init: Init, config: &Config) {
     let mut udp_out_queue = VecDeque::new();
 
     let mut clients = HashMap::new();
+    let mut udp_clients = HashMap::new();
     let mut events = Events::with_capacity(1024);
     let mut next_token: u32 = FIRST_TOKEN;
 
@@ -236,43 +237,64 @@ pub fn server_thread(init: Init, config: &Config) {
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
                         Err(e) => { println!("{:?}", e); continue },
                     };
-                    let mut buf = &udp_buf[..len];
+                    let buf = &udp_buf[..len];
                     eprintln!("{} {:?}", remote, buf);
 
-                    if let Some(connection) = clients.values_mut().next() {
-                        if let Some(crypt) = connection.client.crypt_state.as_mut() {
-                            let ok = crypt.decrypt(&buf, &mut udp_crypt_buf[..buf.len() - 4]);
-                            eprintln!("dec: {} {:?}", ok, &udp_crypt_buf[..buf.len() - 4]);
+                    if let Err(e) = (|| -> Result<(), io::Error> {
+                        if buf.len() < 4 {
+                            // Just throw it away.
+                            return Ok(());
                         }
-                    }
-
-                    match (|| -> Result<(), io::Error> {
-                        let request_type = buf.read_u32::<BigEndian>()?;
-                        match request_type {
-                            0 => {
-                                let ident = buf.read_u64::<BigEndian>()?;
-                                let mut output = Vec::with_capacity(20);
-                                // version: 1.3.0
-                                output.write_u8(0)?;
-                                output.write_u8(1)?;
-                                output.write_u8(3)?;
-                                output.write_u8(0)?;
-                                // write back the ident
-                                output.write_u64::<BigEndian>(ident)?;
-                                // currently connected users count
-                                output.write_u32::<BigEndian>(clients.len() as u32)?;
-                                // maximum user count
-                                output.write_u32::<BigEndian>(100)?;
-                                // allowed bandwidth
-                                output.write_u32::<BigEndian>(64_000)?;
-                                udp_out_queue.push_back((remote, output));
+                        // Four zeros _might_ still be an encrypted packet with
+                        // incredibly low probability, but I don't see a better
+                        // way to check.
+                        if &buf[0..4] == b"\0\0\0\0" {
+                            // Server list ping packet.
+                            let ident = (&buf[4..]).read_u64::<BigEndian>()?;
+                            let mut output = Vec::with_capacity(20);
+                            // version: 1.3.0
+                            output.write_u8(0)?;
+                            output.write_u8(1)?;
+                            output.write_u8(3)?;
+                            output.write_u8(0)?;
+                            // write back the ident
+                            output.write_u64::<BigEndian>(ident)?;
+                            // currently connected users count
+                            output.write_u32::<BigEndian>(clients.len() as u32)?;
+                            // maximum user count
+                            output.write_u32::<BigEndian>(100)?;
+                            // allowed bandwidth
+                            output.write_u32::<BigEndian>(64_000)?;
+                            udp_out_queue.push_back((remote, output));
+                        } else {
+                            // Encrypted UDP packet.
+                            if let Some(connection_key) = udp_clients.get(&remote).copied() {
+                                if let Some(connection) = clients.get_mut(&connection_key) {
+                                    if let Some(crypt) = connection.client.crypt_state.as_mut() {
+                                        let decrypted = &mut udp_crypt_buf[..buf.len() - 4];
+                                        if crypt.decrypt(&buf, decrypted) {
+                                            read_udp(decrypted, &mut connection.client, &mut connection.decoder)?;
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Seems insane but this is what Murmur does.
+                                for (k, connection) in clients.iter_mut() {
+                                    if let Some(crypt) = connection.client.crypt_state.as_mut() {
+                                        let decrypted = &mut udp_crypt_buf[..buf.len() - 4];
+                                        if crypt.decrypt(&buf, decrypted) {
+                                            udp_clients.insert(remote, k.clone());
+                                            read_udp(decrypted, &mut connection.client, &mut connection.decoder)?;
+                                            break;
+                                        }
+                                    }
+                                }
                             }
-                            _ => { /* ignore */ }
                         }
+
                         Ok(())
                     })() {
-                        Ok(()) => {}
-                        Err(e) => { println!("UDP in error: {:?}", e); }
+                        println!("UDP in error: {:?}", e);
                     }
                 }
                 if readiness.is_writable() {
@@ -719,6 +741,10 @@ fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder) -> 
         end: terminator,
     });
     Ok(())
+}
+
+fn read_udp(_buffer: &[u8], _client: &mut Client, _decoder: &mut Decoder) -> io::Result<()> {
+    unimplemented!()
 }
 
 // https://mumble-protocol.readthedocs.io/en/latest/voice_data.html#variable-length-integer-encoding
