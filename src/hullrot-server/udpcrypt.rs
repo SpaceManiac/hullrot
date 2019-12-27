@@ -65,7 +65,6 @@ impl CryptState {
         openssl::rand::rand_bytes(&mut decrypt_iv).expect("rand_bytes failed");
 
         let cipher = symm::Cipher::aes_128_ecb();
-        println!("block size = {}", cipher.block_size());
         let encrypt_key = symm::Crypter::new(cipher, symm::Mode::Encrypt, &raw_key, None).unwrap();
         let decrypt_key = symm::Crypter::new(cipher, symm::Mode::Decrypt, &raw_key, None).unwrap();
 

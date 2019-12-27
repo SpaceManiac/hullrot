@@ -238,7 +238,6 @@ pub fn server_thread(init: Init, config: &Config) {
                         Err(e) => { println!("{:?}", e); continue },
                     };
                     let buf = &udp_buf[..len];
-                    eprintln!("{} {:?}", remote, buf);
 
                     if let Err(e) = (|| -> Result<(), io::Error> {
                         if buf.len() < 4 {
@@ -273,7 +272,7 @@ pub fn server_thread(init: Init, config: &Config) {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
                                         let decrypted = &mut udp_crypt_buf[..buf.len() - 4];
                                         if crypt.decrypt(&buf, decrypted) {
-                                            read_udp(decrypted, &mut connection.client, &mut connection.decoder)?;
+                                            read_voice(decrypted, &mut connection.client, &mut connection.decoder)?;
                                         }
                                     }
                                 }
@@ -283,8 +282,9 @@ pub fn server_thread(init: Init, config: &Config) {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
                                         let decrypted = &mut udp_crypt_buf[..buf.len() - 4];
                                         if crypt.decrypt(&buf, decrypted) {
+                                            connection.udp_remote = Some(remote.clone());
                                             udp_clients.insert(remote, k.clone());
-                                            read_udp(decrypted, &mut connection.client, &mut connection.decoder)?;
+                                            read_voice(decrypted, &mut connection.client, &mut connection.decoder)?;
                                             break;
                                         }
                                     }
@@ -426,7 +426,7 @@ pub fn server_thread(init: Init, config: &Config) {
                                     Ok(()) => {}
                                     Err(e) => { io_error(&mut connection.client, e); break }
                                 }
-                            }
+                            },
                             OutCommand::VoiceData { who, seq, audio, end } => {
                                 // Encode the audio
                                 let len = connection.encoders.entry(who)
@@ -462,7 +462,10 @@ pub fn server_thread(init: Init, config: &Config) {
                                     Ok(()) => {}
                                     Err(e) => { io_error(&mut connection.client, e); break }
                                 }
-                            }
+                            },
+                            OutCommand::VoicePing(_) => {
+                                // TODO
+                            },
                         }
                     } else {
                         break
@@ -527,8 +530,9 @@ pub enum Command {
 pub struct PacketChannel(mpsc::Sender<OutCommand>);
 
 #[derive(Debug)]
-pub enum OutCommand {
+enum OutCommand {
     Packet(Packet),
+    VoicePing(i64),
     VoiceData {
         who: u32,
         seq: i64,
@@ -546,6 +550,10 @@ impl PacketChannel {
     #[inline]
     pub fn send_voice(&self, who: u32, seq: i64, audio: Rc<[Sample]>) -> bool {
         self.0.send(OutCommand::VoiceData { who, seq, audio, end: false }).is_ok()
+    }
+
+    fn send_voice_ping(&self, timestamp: i64) -> bool {
+        self.0.send(OutCommand::VoicePing(timestamp)).is_ok()
     }
 }
 
@@ -600,6 +608,7 @@ struct Connection<'cfg> {
     client: Client<'cfg>,
     decoder: Decoder,
     encoders: HashMap<u32, Encoder>,
+    udp_remote: Option<SocketAddr>,
 }
 
 impl<'cfg> Connection<'cfg> {
@@ -615,6 +624,7 @@ impl<'cfg> Connection<'cfg> {
             write_buf: BufWriter::new(),
             write_rx: rx,
             client: Client::new(config, remote, PacketChannel(tx), session),
+            udp_remote: None,
         }
     }
 }
@@ -700,7 +710,7 @@ fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder) -> 
     let (ty, target) = (header >> 5, header & 0b11111);
     if ty == PING {
         let timestamp = read_varint(&mut buffer)?;
-        println!("Ping: {}", timestamp);
+        client.sender.send_voice_ping(timestamp);
         return Ok(())
     } else if ty != OPUS {
         println!("Unknown type: {}", ty);
@@ -741,10 +751,6 @@ fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder) -> 
         end: terminator,
     });
     Ok(())
-}
-
-fn read_udp(_buffer: &[u8], _client: &mut Client, _decoder: &mut Decoder) -> io::Result<()> {
-    unimplemented!()
 }
 
 // https://mumble-protocol.readthedocs.io/en/latest/voice_data.html#variable-length-integer-encoding
