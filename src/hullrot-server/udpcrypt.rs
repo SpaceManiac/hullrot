@@ -156,6 +156,11 @@ impl CryptState {
             } else {
                 return None;
             }
+
+            if self.decrypt_history[self.decrypt_iv[0] as usize] == self.decrypt_iv[1] {
+                self.decrypt_iv.copy_from_slice(&saveiv);
+                return None;
+            }
         }
 
         let sliced_dst = &mut dst[..source.len() - 4];
