@@ -453,6 +453,7 @@ pub struct Client<'cfg> {
     disconnected: Option<Cow<'static, str>>,
     events: VecDeque<net::Command>,
     crypt_state: Option<udpcrypt::CryptState>,
+    udp_valid: bool,
     // state
     admin: bool,
     session: u32,
@@ -483,6 +484,7 @@ impl<'cfg> Client<'cfg> {
             admin,
             sender,
             crypt_state: None,
+            udp_valid: false,
             auth_state: AuthState::Initial,
 
             disconnected: None,

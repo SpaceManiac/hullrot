@@ -272,7 +272,7 @@ pub fn server_thread(init: Init, config: &Config) {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
                                         let decrypted = &mut udp_crypt_buf[..buf.len() - 4];
                                         if crypt.decrypt(&buf, decrypted) {
-                                            read_voice(decrypted, &mut connection.client, &mut connection.decoder)?;
+                                            read_voice(decrypted, &mut connection.client, &mut connection.decoder, true)?;
                                         }
                                     }
                                 }
@@ -284,7 +284,7 @@ pub fn server_thread(init: Init, config: &Config) {
                                         if crypt.decrypt(&buf, decrypted) {
                                             connection.udp_remote = Some(remote.clone());
                                             udp_clients.insert(remote, k.clone());
-                                            read_voice(decrypted, &mut connection.client, &mut connection.decoder)?;
+                                            read_voice(decrypted, &mut connection.client, &mut connection.decoder, true)?;
                                             break;
                                         }
                                     }
@@ -676,7 +676,7 @@ fn read_packets<R: BufRead + ?Sized>(read: &mut R, client: &mut Client, decoder:
                     break;  // incomplete
                 }
                 if ty == 1 {  // UdpTunnel
-                    read_voice(&buffer[6..len], client, decoder)?;
+                    read_voice(&buffer[6..len], client, decoder, false)?;
                 } else {
                     let packet = Packet::parse(ty, &buffer[6..len])?;
                     // handle pings immediately, save Client the trouble
@@ -697,7 +697,7 @@ fn read_packets<R: BufRead + ?Sized>(read: &mut R, client: &mut Client, decoder:
     }
 }
 
-fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder) -> io::Result<()> {
+fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder, set_udp_valid: bool) -> io::Result<()> {
     //const CELT_ALPHA: u8 = 0;
     const PING: u8 = 1;
     //const SPEEX: u8 = 2;
@@ -719,6 +719,8 @@ fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder) -> 
     if target != TARGET_NORMAL {
         println!("Unknown target: {}", target);
     }
+
+    client.udp_valid = set_udp_valid;
 
     // incoming format
     let sequence_number = read_varint(&mut buffer)?;
