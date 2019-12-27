@@ -270,8 +270,7 @@ pub fn server_thread(init: Init, config: &Config) {
                             if let Some(connection_key) = udp_clients.get(&remote).copied() {
                                 if let Some(connection) = clients.get_mut(&connection_key) {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
-                                        let decrypted = &mut udp_crypt_buf[..buf.len() - 4];
-                                        if crypt.decrypt(&buf, decrypted) {
+                                        if let Some(decrypted) = crypt.decrypt(buf, &mut udp_crypt_buf) {
                                             read_voice(decrypted, &mut connection.client, &mut connection.decoder, true)?;
                                         }
                                     }
@@ -280,8 +279,7 @@ pub fn server_thread(init: Init, config: &Config) {
                                 // Seems insane but this is what Murmur does.
                                 for (k, connection) in clients.iter_mut() {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
-                                        let decrypted = &mut udp_crypt_buf[..buf.len() - 4];
-                                        if crypt.decrypt(&buf, decrypted) {
+                                        if let Some(decrypted) = crypt.decrypt(buf, &mut udp_crypt_buf) {
                                             connection.udp_remote = Some(remote.clone());
                                             udp_clients.insert(remote, k.clone());
                                             read_voice(decrypted, &mut connection.client, &mut connection.decoder, true)?;

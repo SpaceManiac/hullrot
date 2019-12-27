@@ -104,9 +104,9 @@ impl CryptState {
         &mut dst[..4 + source.len()]
     }
 
-    pub fn decrypt(&mut self, source: &[u8], dst: &mut [u8]) -> bool {
+    pub fn decrypt<'d>(&mut self, source: &[u8], dst: &'d mut [u8]) -> Option<&'d mut [u8]> {
         if source.len() < 4 {
-            return false;
+            return None;
         }
 
         let mut saveiv = [0u8; AES_BLOCK_SIZE];
@@ -124,7 +124,7 @@ impl CryptState {
                 self.decrypt_iv[0] = ivbyte;
                 increment_iv(&mut self.decrypt_iv[1..]);
             } else {
-                return false;
+                return None;
             }
         } else {
             // This is either out of order or a repeat.
@@ -154,15 +154,16 @@ impl CryptState {
                 self.decrypt_iv[0] = ivbyte;
                 increment_iv(&mut self.decrypt_iv[1..]);
             } else {
-                return false;
+                return None;
             }
         }
 
-        ocb_decrypt(&mut self.encrypt_key, &mut self.decrypt_key, &source[4..], dst, &self.decrypt_iv, &mut tag);
+        let sliced_dst = &mut dst[..source.len() - 4];
+        ocb_decrypt(&mut self.encrypt_key, &mut self.decrypt_key, &source[4..], sliced_dst, &self.decrypt_iv, &mut tag);
 
         if &tag[..3] != &source[1..4] {
             self.decrypt_iv.copy_from_slice(&saveiv);
-            return false;
+            return None;
         }
         self.decrypt_history[self.decrypt_iv[0] as usize] = self.decrypt_iv[1];
 
@@ -175,7 +176,7 @@ impl CryptState {
         // uiLost += lost;
 
         // tLastGood.restart();
-        true
+        Some(sliced_dst)
     }
 }
 
