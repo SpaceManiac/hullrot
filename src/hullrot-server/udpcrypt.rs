@@ -46,6 +46,10 @@ pub struct CryptState {
 
     encrypt_key: AesKey,
     decrypt_key: AesKey,
+
+    ui_good: u32,
+    ui_late: u32,
+    ui_lost: u32,
 }
 
 impl std::fmt::Debug for CryptState {
@@ -76,6 +80,10 @@ impl CryptState {
 
             encrypt_key,
             decrypt_key,
+
+            ui_good: 0,
+            ui_late: 0,
+            ui_lost: 0,
         }
     }
 
@@ -87,6 +95,12 @@ impl CryptState {
             set_client_nonce: self.decrypt_iv.to_vec(),
             set_server_nonce: self.encrypt_iv.to_vec(),
         }
+    }
+
+    pub fn set_stats(&self, ping: &mut mumble_protocol::Ping) {
+        ping.set_good(self.ui_good);
+        ping.set_lost(self.ui_lost);
+        ping.set_late(self.ui_late);
     }
 
     pub fn encrypt<'d>(&mut self, source: &[u8], dst: &'d mut [u8]) -> &'d mut [u8] {
@@ -114,6 +128,9 @@ impl CryptState {
         let mut restore = false;
         let mut tag = [0u8; AES_KEY_SIZE_BYTES];
 
+        let mut late = 0;
+        let mut lost = 0;
+
         saveiv.copy_from_slice(&self.decrypt_iv);
 
         if self.decrypt_iv[0].wrapping_add(1) == ivbyte {
@@ -133,24 +150,24 @@ impl CryptState {
 
             if ivbyte < self.decrypt_iv[0] && diff > -30 && diff < 0 {
                 // Late packet, but no wraparound.
-                //late = 1;
-                //lost = -1;
+                late = 1;
+                lost = 0u32.wrapping_sub(1);
                 self.decrypt_iv[0] = ivbyte;
                 restore = true;
             } else if ivbyte > self.decrypt_iv[0] && diff > -30 && diff < 0 {
                 // Last was 0x02, here comes 0xff from last round
-                //late = 1;
-                //lost = -1;
+                late = 1;
+                lost = 0u32.wrapping_sub(1);
                 self.decrypt_iv[0] = ivbyte;
                 decrement_iv(&mut self.decrypt_iv[1..]);
                 restore = true;
             } else if ivbyte > self.decrypt_iv[0] && diff > 0 {
                 // Lost a few packets, but beyond that we're good.
-                //lost = (ivbyte as i32).wrapping_sub(self.decrypt_iv[0] as i32).wrapping_sub(1);
+                lost = (ivbyte as u32).wrapping_sub(self.decrypt_iv[0] as u32).wrapping_sub(1);
                 self.decrypt_iv[0] = ivbyte;
             } else if ivbyte < self.decrypt_iv[0] && diff > 0 {
                 // Lost a few packets, and wrapped around.
-                //lost = 255i32.wrapping_sub(self.decrypt_iv[0] as i32).wrapping_add(ivbyte as i32);
+                lost = 255u32.wrapping_sub(self.decrypt_iv[0] as u32).wrapping_add(ivbyte as u32);
                 self.decrypt_iv[0] = ivbyte;
                 increment_iv(&mut self.decrypt_iv[1..]);
             } else {
@@ -176,9 +193,9 @@ impl CryptState {
             self.decrypt_iv.copy_from_slice(&saveiv);
         }
 
-        // uiGood++;
-        // uiLate += late;
-        // uiLost += lost;
+        self.ui_good = self.ui_good.wrapping_add(1);
+        self.ui_late = self.ui_late.wrapping_add(late);
+        self.ui_lost = self.ui_lost.wrapping_add(lost);
 
         // tLastGood.restart();
         Some(sliced_dst)

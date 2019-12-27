@@ -638,6 +638,12 @@ impl<'cfg> Client<'cfg> {
                         other.kick(format!("Kicked by {}: {}", self, remove.get_reason()));
                     });
                 },
+                Command::Packet(Packet::Ping(mut ping)) => {
+                    if let Some(crypt) = self.crypt_state.as_ref() {
+                        crypt.set_stats(&mut ping);
+                    }
+                    self.sender.send(ping);
+                },
                 Command::Packet(_) => {},
                 Command::VoiceData { seq, audio, end } => {
                     if !server.playing {
