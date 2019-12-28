@@ -724,13 +724,16 @@ fn read_packets<R: BufRead + ?Sized>(read: &mut R, client: &mut Client, decoder:
                     let packet = Packet::parse(ty, &buffer[6..len])?;
                     // handle pings immediately, save Client the trouble
                     if let Packet::Ping(ref ping) = packet {
-                        client.sender.send(packet! { Ping;
+                        let mut pong = packet! { Ping;
                             set_timestamp: ping.get_timestamp(),
-                        });
+                        };
+                        if let Some(crypt) = client.crypt_state.as_ref() {
+                            crypt.set_stats(&mut pong);
+                        }
+                        client.sender.send(pong);
                     } else {
-                        //println!("IN: {:?}", packet);
+                        client.events.push_back(Command::Packet(packet));
                     }
-                    client.events.push_back(Command::Packet(packet));
                 }
                 consumed += len;
                 buffer = &buffer[len..];
