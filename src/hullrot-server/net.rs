@@ -250,21 +250,22 @@ pub fn server_thread(init: Init, config: &Config) {
                         if &buf[0..4] == b"\0\0\0\0" {
                             // Server list ping packet.
                             let ident = (&buf[4..]).read_u64::<BigEndian>()?;
-                            let mut output = Vec::with_capacity(20);
-                            // version: 1.3.0
-                            output.write_u8(0)?;
-                            output.write_u8(1)?;
-                            output.write_u8(3)?;
-                            output.write_u8(0)?;
-                            // write back the ident
-                            output.write_u64::<BigEndian>(ident)?;
-                            // currently connected users count
-                            output.write_u32::<BigEndian>(clients.len() as u32)?;
-                            // maximum user count
-                            output.write_u32::<BigEndian>(100)?;
-                            // allowed bandwidth
-                            output.write_u32::<BigEndian>(64_000)?;
-                            udp_out_queue.push_back((remote, output));
+                            let response = encode(&mut udp_crypt_buf, |output| {
+                                // version: 1.3.0
+                                let _ = output.write_u8(0);
+                                let _ = output.write_u8(1);
+                                let _ = output.write_u8(3);
+                                let _ = output.write_u8(0);
+                                // write back the ident
+                                let _ = output.write_u64::<BigEndian>(ident);
+                                // currently connected users count
+                                let _ = output.write_u32::<BigEndian>(clients.len() as u32);
+                                // maximum user count
+                                let _ = output.write_u32::<BigEndian>(100);
+                                // allowed bandwidth
+                                let _ = output.write_u32::<BigEndian>(64_000);
+                            });
+                            udp_queue(&udp, &mut udp_writeable, &mut udp_out_queue, &remote, response);
                         } else {
                             // Encrypted UDP packet.
                             if let Some(connection_key) = udp_clients.get(&remote).copied() {
