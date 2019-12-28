@@ -460,7 +460,7 @@ pub fn server_thread(init: Init, config: &Config) {
                                         if let Some(remote) = udp_remote {
                                             if let Some(crypt) = crypt {
                                                 let encrypted = crypt.encrypt(&datagram, &mut udp_crypt_buf);
-                                                udp_out_queue.push_back((remote.clone(), encrypted.to_vec()));
+                                                udp_queue(&udp, &mut udp_writeable, &mut udp_out_queue, &remote, encrypted);
                                             }
                                         }
                                     }
@@ -491,7 +491,7 @@ pub fn server_thread(init: Init, config: &Config) {
                                 if let Some(remote) = connection.udp_remote.as_ref() {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
                                         let encrypted = crypt.encrypt(&datagram, &mut udp_crypt_buf);
-                                        udp_out_queue.push_back((remote.clone(), encrypted.to_vec()));
+                                        udp_queue(&udp, &mut udp_writeable, &mut udp_out_queue, &remote, encrypted);
                                     }
                                 }
 
@@ -521,18 +521,34 @@ pub fn server_thread(init: Init, config: &Config) {
         // Handle UDP writes
         while udp_writeable {
             if let Some((remote, packet)) = udp_out_queue.pop_front() {
-                match udp.send_to(&packet, &remote) {
-                    Ok(_) => {},
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        udp_writeable = false;
-                        break;
-                    }
-                    Err(e) => { println!("UDP out error: {:?}", e); continue },
+                if !udp_write(&udp, &mut udp_writeable, &remote, &packet) {
+                    udp_out_queue.push_front((remote, packet));
+                    break;
                 }
             } else {
                 break
             }
         }
+    }
+}
+
+fn udp_queue(udp: &UdpSocket, writeable: &mut bool, udp_out_queue: &mut VecDeque<(SocketAddr, Vec<u8>)>, remote: &SocketAddr, packet: &[u8]) {
+    if *writeable {
+        if udp_write(udp, writeable, remote, packet) {
+            return;
+        }
+    }
+    udp_out_queue.push_back((remote.clone(), packet.to_vec()));
+}
+
+fn udp_write(udp: &UdpSocket, writeable: &mut bool, remote: &SocketAddr, packet: &[u8]) -> bool {
+    match udp.send_to(packet, remote) {
+        Ok(_) => true,
+        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+            *writeable = false;
+            false
+        }
+        Err(e) => { println!("UDP out error: {:?}", e); true }
     }
 }
 
