@@ -297,8 +297,9 @@ fn aes_encrypt(src: &Keyblock, dst: &mut Keyblock, key: &mut AesKey) {
     dst.copy_from_slice(&dst2[..AES_BLOCK_SIZE]);
 }
 
-fn aes_decrypt(src: &Keyblock, dst: &mut Keyblock, key: &mut AesKey) {
-    aes_encrypt(src, dst, key)
+fn aes_decrypt(src: &Keyblock, dst: &mut Keyblock, key: &Keyblock) {
+    let mut decrypt_key = symm::Crypter::new(symm::Cipher::aes_128_ecb(), symm::Mode::Decrypt, key, None).unwrap();
+    aes_encrypt(src, dst, &mut decrypt_key)
 }
 
 use std::convert::TryInto;
@@ -357,8 +358,7 @@ fn ocb_decrypt(encrypt_key: &mut AesKey, raw_key: &Keyblock, mut encrypted: &[u8
     while len > AES_BLOCK_SIZE {
         s2(&mut delta);
         xor(&mut tmp, &delta, (&encrypted[..AES_BLOCK_SIZE]).try_into().unwrap());
-        let mut decrypt_key = symm::Crypter::new(symm::Cipher::aes_128_ecb(), symm::Mode::Decrypt, raw_key, None).unwrap();
-        aes_decrypt(&tmp, &mut pad, &mut decrypt_key);
+        aes_decrypt(&tmp, &mut pad, raw_key);
         xor((&mut plain[..AES_BLOCK_SIZE]).try_into().unwrap(), &delta, &pad);
         xor_self(&mut checksum, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
         len -= AES_BLOCK_SIZE;
