@@ -1,6 +1,6 @@
 [package]
 name = "hullrot-server"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Tad Hardesty <tad@platymuus.com>"]
 description = "Immersive roleplaying Mumble server"
 
