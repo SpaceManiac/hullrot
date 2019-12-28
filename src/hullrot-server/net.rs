@@ -459,8 +459,8 @@ pub fn server_thread(init: Init, config: &Config) {
                                     if udp_valid {
                                         if let Some(remote) = udp_remote {
                                             if let Some(crypt) = crypt {
-                                                udp.send_to(crypt.encrypt(&datagram, &mut udp_crypt_buf), remote)?;
-                                                return Ok(());
+                                                let encrypted = crypt.encrypt(&datagram, &mut udp_crypt_buf);
+                                                udp_out_queue.push_back((remote.clone(), encrypted.to_vec()));
                                             }
                                         }
                                     }
@@ -490,10 +490,8 @@ pub fn server_thread(init: Init, config: &Config) {
                                 // Check if we're good to transmit over UDP
                                 if let Some(remote) = connection.udp_remote.as_ref() {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
-                                        if let Err(e) = udp.send_to(crypt.encrypt(&datagram, &mut udp_crypt_buf), remote) {
-                                            io_error(&mut connection.client, e);
-                                            break;
-                                        }
+                                        let encrypted = crypt.encrypt(&datagram, &mut udp_crypt_buf);
+                                        udp_out_queue.push_back((remote.clone(), encrypted.to_vec()));
                                     }
                                 }
 
