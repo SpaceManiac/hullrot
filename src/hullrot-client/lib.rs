@@ -96,8 +96,8 @@ unsafe fn parse_args<'a>(argc: c_int, argv: *const *const c_char) -> Vec<&'a [u8
 macro_rules! function {
     ($name:ident($($args:ident)*) $body:block) => {
         #[no_mangle]
-        pub unsafe extern fn $name(_argc: c_int, _argv: *const *const c_char) -> *const c_char {
-            $(let $args = &parse_args(_argc, _argv)[..];)*
+        pub extern fn $name(_argc: c_int, _argv: *const *const c_char) -> *const c_char {
+            $(let $args = unsafe { &parse_args(_argc, _argv)[..] };)*
             $body
         }
     }
