@@ -32,12 +32,10 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
  * OCB with something else or get yourself a license.
  */
 
-use openssl::symm;
+use openssl::symm::{Crypter, Cipher, Mode};
 
 const AES_KEY_SIZE_BYTES: usize = 16;
 const AES_BLOCK_SIZE: usize = 16;
-
-type AesKey = symm::Crypter;
 
 pub struct CryptState {
     raw_key: [u8; AES_KEY_SIZE_BYTES],
@@ -45,7 +43,7 @@ pub struct CryptState {
     decrypt_iv: [u8; AES_BLOCK_SIZE],
     decrypt_history: [u8; 0x100],
 
-    encrypt_key: AesKey,
+    encrypt_key: Crypter,
 
     ui_good: u32,
     ui_late: u32,
@@ -72,8 +70,8 @@ impl CryptState {
     }
 
     fn from_parameters(raw_key: [u8; AES_KEY_SIZE_BYTES], encrypt_iv: [u8; AES_BLOCK_SIZE], decrypt_iv: [u8; AES_BLOCK_SIZE]) -> CryptState {
-        let cipher = symm::Cipher::aes_128_ecb();
-        let encrypt_key = symm::Crypter::new(cipher, symm::Mode::Encrypt, &raw_key, None).unwrap();
+        let cipher = Cipher::aes_128_ecb();
+        let encrypt_key = Crypter::new(cipher, Mode::Encrypt, &raw_key, None).unwrap();
 
         CryptState {
             raw_key,
@@ -291,20 +289,20 @@ fn zero<T: Default>(block: &mut [T]) {
     }
 }
 
-fn aes_encrypt(src: &Keyblock, dst: &mut Keyblock, key: &mut AesKey) {
+fn aes_encrypt(src: &Keyblock, dst: &mut Keyblock, key: &mut Crypter) {
     let mut dst2 = [0; 2 * AES_BLOCK_SIZE];
     key.update(src, &mut dst2).unwrap();
     dst.copy_from_slice(&dst2[..AES_BLOCK_SIZE]);
 }
 
 fn aes_decrypt(src: &Keyblock, dst: &mut Keyblock, key: &Keyblock) {
-    let mut decrypt_key = symm::Crypter::new(symm::Cipher::aes_128_ecb(), symm::Mode::Decrypt, key, None).unwrap();
+    let mut decrypt_key = Crypter::new(Cipher::aes_128_ecb(), Mode::Decrypt, key, None).unwrap();
     aes_encrypt(src, dst, &mut decrypt_key)
 }
 
 use std::convert::TryInto;
 
-fn ocb_encrypt(encrypt_key: &mut AesKey, mut plain: &[u8], mut encrypted: &mut [u8], nonce: &Keyblock, tag: &mut Keyblock) {
+fn ocb_encrypt(encrypt_key: &mut Crypter, mut plain: &[u8], mut encrypted: &mut [u8], nonce: &Keyblock, tag: &mut Keyblock) {
     assert_eq!(plain.len(), encrypted.len());
     let mut len = plain.len();
 
@@ -343,7 +341,7 @@ fn ocb_encrypt(encrypt_key: &mut AesKey, mut plain: &[u8], mut encrypted: &mut [
     aes_encrypt(&tmp, tag, encrypt_key);
 }
 
-fn ocb_decrypt(encrypt_key: &mut AesKey, raw_key: &Keyblock, mut encrypted: &[u8], mut plain: &mut [u8], nonce: &Keyblock, tag: &mut Keyblock) {
+fn ocb_decrypt(encrypt_key: &mut Crypter, raw_key: &Keyblock, mut encrypted: &[u8], mut plain: &mut [u8], nonce: &Keyblock, tag: &mut Keyblock) {
     assert_eq!(plain.len(), encrypted.len());
     let mut len = plain.len();
 
