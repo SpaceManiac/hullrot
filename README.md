@@ -107,8 +107,8 @@ to use that config file instead.
 Hullrot's DM code will need to be integrated into your codebase. The primary
 implementation should be straightforward to port to any [/tg/station] fork:
 
-* [controller](https://github.com/AutomaticFrenzy/tgstation/blob/master/code/controllers/subsystem/hullrot.dm)
-* [user interface](https://github.com/AutomaticFrenzy/tgstation/blob/master/code/superbox/hullrot.dm)
+* [controller](./integrations/space_station_13/SShullrot.dm)
+* [user interface](./integrations/space_station_13/hullrot.dm)
 
 The exact behavior - who can speak to who when, what radio channels are
 available, which mobs are restricted from using the radio - can be understood
