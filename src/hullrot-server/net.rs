@@ -52,7 +52,7 @@ pub struct Init {
     udp: UdpSocket,
 }
 
-pub fn init_server(config: &Config) -> Result<Init, Box<dyn (::std::error::Error)>> {
+pub fn init_server(config: &Config) -> Result<Init, Box<dyn std::error::Error>> {
     // TODO: audit
     let mut ctx = SslContext::builder(SslMethod::tls())?;
     ctx.set_cipher_list("EECDH+AESGCM:EDH+aRSA+AESGCM:DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA")?;
@@ -93,7 +93,7 @@ pub fn init_server(config: &Config) -> Result<Init, Box<dyn (::std::error::Error
 }
 
 #[deny(unused_must_use)]
-fn create_self_signed_cert(cert_pem: &str, key_pem: &str) -> Result<(), Box<dyn (::std::error::Error)>> {
+fn create_self_signed_cert(cert_pem: &str, key_pem: &str) -> Result<(), Box<dyn std::error::Error>> {
     use openssl::x509::*;
     use openssl::x509::extension::*;
     use openssl::pkey::PKey;
@@ -166,7 +166,7 @@ pub fn server_thread(init: Init, config: &Config) {
 
     println!("Started");
     loop {
-        poll.poll(&mut events, Some(::std::time::Duration::from_millis(5))).unwrap();
+        poll.poll(&mut events, Some(std::time::Duration::from_millis(5))).unwrap();
 
         // Check readiness events
         for event in events.iter() {
@@ -311,7 +311,7 @@ pub fn server_thread(init: Init, config: &Config) {
                             connection.hash_delivered = true;
                             let hash = stream.ssl().peer_certificate()
                                 // Murmur uses SHA-1 so we shall too
-                                .and_then(|cert| cert.digest(::openssl::hash::MessageDigest::sha1()).ok())
+                                .and_then(|cert| cert.digest(openssl::hash::MessageDigest::sha1()).ok())
                                 .map(|digest| {
                                     let mut buf = String::new();
                                     for byte in digest.iter() {

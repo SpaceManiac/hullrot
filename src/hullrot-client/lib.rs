@@ -88,7 +88,7 @@ fn with_handle<F: FnOnce(&mut Handle) -> *const c_char>(f: F) -> *const c_char {
 unsafe fn parse_args<'a>(argc: c_int, argv: *const *const c_char) -> Vec<&'a [u8]> {
     let mut args = Vec::new();
     for i in 0..argc as isize {
-        args.push(::std::ffi::CStr::from_ptr(*argv.offset(i)).to_bytes());
+        args.push(std::ffi::CStr::from_ptr(*argv.offset(i)).to_bytes());
     }
     args
 }
@@ -217,7 +217,7 @@ struct Init {
     stream: TcpStream,
 }
 
-fn init_control(addr: &str) -> Result<Init, Box<dyn (::std::error::Error)>> {
+fn init_control(addr: &str) -> Result<Init, Box<dyn std::error::Error>> {
     let poll = Poll::new()?;
     let addr = addr.parse()?;
     let stream = TcpStream::connect(&addr)?;
@@ -233,7 +233,7 @@ fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mps
     let mut write_buf = hullrot_common::BufWriter::new();
 
     'main: loop {
-        if let Err(e) = poll.poll(&mut events, Some(::std::time::Duration::from_millis(5))) {
+        if let Err(e) = poll.poll(&mut events, Some(std::time::Duration::from_millis(5))) {
             return control_fatal(&event_tx, &e.to_string());
         }
 
