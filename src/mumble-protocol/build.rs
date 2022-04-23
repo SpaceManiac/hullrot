@@ -20,11 +20,11 @@ use std::io::Write;
 fn main() {
     // run protoc
     let out_dir = std::env::var("OUT_DIR").expect("missing OUT_DIR");
-    if let Err(e) = protoc_rust::run(protoc_rust::Args {
-        input: &["Mumble.proto"],
-        out_dir: &out_dir,
-        .. Default::default()
-    }) {
+    if let Err(e) = protoc_rust::Codegen::new()
+        .input("Mumble.proto")
+        .out_dir(&out_dir)
+        .run()
+    {
         eprintln!("Failed to run the protobuf code generator.");
         eprintln!("Ensure that `protoc` is available and on the PATH.");
         eprintln!();

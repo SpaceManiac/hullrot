@@ -35,7 +35,7 @@ macro_rules! packets {
         impl Packet {
             pub fn parse(ty: u16, buf: &[u8]) -> protobuf::ProtobufResult<Packet> {
                 match ty {
-                    $($num => protobuf::parse_from_bytes::<$name>(buf).map(Packet::$name),)*
+                    $($num => $name::parse_from_bytes(buf).map(Packet::$name),)*
                     _ => Err(protobuf::ProtobufError::message_not_initialized("unknown opcode"))
                 }
             }
