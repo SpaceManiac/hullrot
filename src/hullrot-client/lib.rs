@@ -85,9 +85,9 @@ fn with_handle<F: FnOnce(&mut Handle) -> *const c_char>(f: F) -> *const c_char {
 }
 
 #[allow(dead_code)]
-unsafe fn parse_args<'a>(argc: c_int, argv: *const *const c_char) -> Vec<&'a [u8]> {
+unsafe fn parse_args<'a>(argc: &'a c_int, argv: &'a *const *const c_char) -> Vec<&'a [u8]> {
     let mut args = Vec::new();
-    for i in 0..argc as isize {
+    for i in 0..*argc as isize {
         args.push(std::ffi::CStr::from_ptr(*argv.offset(i)).to_bytes());
     }
     args
@@ -97,7 +97,7 @@ macro_rules! function {
     ($name:ident($($args:ident)*) $body:block) => {
         #[no_mangle]
         pub extern fn $name(_argc: c_int, _argv: *const *const c_char) -> *const c_char {
-            $(let $args = unsafe { &parse_args(_argc, _argv)[..] };)*
+            $(let $args = unsafe { &parse_args(&_argc, &_argv)[..] };)*
             $body
         }
     }
