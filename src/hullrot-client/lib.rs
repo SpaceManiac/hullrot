@@ -220,13 +220,13 @@ struct Init {
 fn init_control(addr: &str) -> Result<Init, Box<dyn std::error::Error>> {
     let poll = Poll::new()?;
     let addr = addr.parse()?;
-    let stream = TcpStream::connect(&addr)?;
-    poll.register(&stream, CLIENT, Ready::readable() | Ready::writable(), PollOpt::edge())?;
+    let mut stream = TcpStream::connect(addr)?;
+    poll.registry().register(&mut stream, CLIENT, Interest::READABLE | Interest::WRITABLE)?;
     Ok(Init { poll, stream })
 }
 
 fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mpsc::Sender<Vec<u8>>) {
-    let Init { poll, mut stream } = init;
+    let Init { mut poll, mut stream } = init;
     let mut events = Events::with_capacity(1024);
 
     let mut read_buf = hullrot_common::BufReader::new();
@@ -239,11 +239,10 @@ fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mps
 
         // Check readiness events
         for event in events.iter() {
-            let readiness = event.readiness();
-            if readiness.is_writable() {
+            if event.is_writable() {
                 write_buf.mark_writable();
             }
-            if readiness.is_readable() {
+            if event.is_readable() {
                 match read_packets(&mut read_buf.with(&mut stream), &event_tx) {
                     Ok(()) => {},
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},

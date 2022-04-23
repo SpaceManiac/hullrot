@@ -75,19 +75,19 @@ pub fn init_server(config: &Config) -> Result<Init, Box<dyn std::error::Error>> 
     let ctx = ctx.build();
 
     let poll = Poll::new()?;
-    let addr = config.mumble_addr.parse()?;
-    println!("Binding tcp/{}", addr);
-    let server = TcpListener::bind(&addr)?;
-    poll.register(&server, TCP_SERVER, Ready::readable(), PollOpt::edge())?;
+    let mumble_addr = config.mumble_addr.parse()?;
+    println!("Binding tcp/{}", mumble_addr);
+    let mut server = TcpListener::bind(mumble_addr)?;
+    poll.registry().register(&mut server, TCP_SERVER, Interest::READABLE)?;
 
-    println!("Binding udp/{}", addr);
-    let udp = UdpSocket::bind(&addr).unwrap();
-    poll.register(&udp, UDP_SOCKET, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
+    println!("Binding udp/{}", mumble_addr);
+    let mut udp = UdpSocket::bind(mumble_addr).unwrap();
+    poll.registry().register(&mut udp, UDP_SOCKET, Interest::READABLE | Interest::WRITABLE).unwrap();
 
-    let addr = config.control_addr.parse()?;
-    println!("Binding tcp/{}", addr);
-    let control_server = TcpListener::bind(&addr)?;
-    poll.register(&control_server, CONTROL_SERVER, Ready::readable(), PollOpt::edge())?;
+    let control_addr = config.control_addr.parse()?;
+    println!("Binding tcp/{}", control_addr);
+    let mut control_server = TcpListener::bind(control_addr)?;
+    poll.registry().register(&mut control_server, CONTROL_SERVER, Interest::READABLE)?;
 
     Ok(Init { ctx, poll, server, control_server, udp })
 }
@@ -149,7 +149,7 @@ fn create_self_signed_cert(cert_pem: &str, key_pem: &str) -> Result<(), Box<dyn 
 }
 
 pub fn server_thread(init: Init, config: &Config) {
-    let Init { ctx, poll, server, control_server, udp } = init;
+    let Init { ctx, mut poll, server, control_server, udp } = init;
     let mut encode_buf = vec![0u8; 1024]; // Docs say this could go up to 0x7fffff (8MiB - 1B) in size
     let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit
     let mut udp_crypt_buf = [0u8; 1024];
@@ -173,7 +173,7 @@ pub fn server_thread(init: Init, config: &Config) {
             if event.token() == TCP_SERVER {
                 // Accept connections until we get a WouldBlock
                 loop {
-                    let (stream, remote) = match server.accept() {
+                    let (mut stream, remote) = match server.accept() {
                         Ok(r) => r,
                         Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
@@ -184,7 +184,7 @@ pub fn server_thread(init: Init, config: &Config) {
                     let session = next_token;
                     let token = Token(session as usize);
                     next_token = next_token.checked_add(1).expect("token overflow");
-                    poll.register(&stream, token, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
+                    poll.registry().register(&mut stream, token, Interest::READABLE | Interest::WRITABLE).unwrap();
 
                     let ssl = Ssl::new(&ctx).unwrap();
                     let stream = Stream::new(ssl.accept(stream));
@@ -192,7 +192,7 @@ pub fn server_thread(init: Init, config: &Config) {
                 }
             } else if event.token() == CONTROL_SERVER {
                 loop {
-                    let (stream, remote) = match control_server.accept() {
+                    let (mut stream, remote) = match control_server.accept() {
                         Ok(r) => r,
                         Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
@@ -201,22 +201,21 @@ pub fn server_thread(init: Init, config: &Config) {
                     if !remote.ip().is_loopback() {
                         println!("CONTROL: {} rejected", remote);
                     }
-                    if let Some(old) = control_client.take() {
+                    if let Some(mut old) = control_client.take() {
                         println!("CONTROL: dropping previous");
-                        poll.deregister(&old.stream).unwrap();
+                        poll.registry().deregister(&mut old.stream).unwrap();
                     }
                     println!("CONTROL: {} connected", remote);
-                    poll.register(&stream, CONTROL_CHANNEL, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
+                    poll.registry().register(&mut stream, CONTROL_CHANNEL, Interest::READABLE | Interest::WRITABLE).unwrap();
                     control.connect();
                     control_client = Some(ControlConnection::new(stream));
                 }
             } else if event.token() == CONTROL_CHANNEL {
                 if let Some(ref mut control_client) = control_client {
-                    let readiness = event.readiness();
-                    if readiness.is_writable() {
+                    if event.is_writable() {
                         control_client.write_buf.mark_writable();
                     }
-                    if readiness.is_readable() {
+                    if event.is_readable() {
                         match control_client.read(&mut control.read_queue) {
                             Ok(()) => {},
                             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
@@ -229,8 +228,7 @@ pub fn server_thread(init: Init, config: &Config) {
                     }
                 }
             } else if event.token() == UDP_SOCKET {
-                let readiness = event.readiness();
-                while readiness.is_readable() {
+                while event.is_readable() {
                     let (len, remote) = match udp.recv_from(&mut udp_buf[..]) {
                         Ok(r) => r,
                         Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -296,16 +294,15 @@ pub fn server_thread(init: Init, config: &Config) {
                         println!("UDP in error: {:?}", e);
                     }
                 }
-                if readiness.is_writable() {
+                if event.is_writable() {
                     udp_writeable = true;
                 }
             } else {
                 let connection = clients.get_mut(&event.token()).unwrap();
-                let readiness = event.readiness();
-                if readiness.is_writable() {
+                if event.is_writable() {
                     connection.write_buf.mark_writable();
                 }
-                if readiness.is_readable() {
+                if event.is_readable() {
                     if let Some(stream) = connection.stream.resolve() {
                         if !connection.hash_delivered {
                             connection.hash_delivered = true;
@@ -510,7 +507,7 @@ pub fn server_thread(init: Init, config: &Config) {
                     connection.client.disconnected = Some(message);  // for quit() and the drop at the end
                     connection.client.quit(&mut control, Everyone(before, after));
                     if let Some(tcp) = connection.stream.inner() {
-                        poll.deregister(tcp).unwrap();
+                        poll.registry().deregister(tcp).unwrap();
                     }
                 }
             }
@@ -543,7 +540,7 @@ fn udp_queue(udp: &UdpSocket, writeable: &mut bool, udp_out_queue: &mut VecDeque
 }
 
 fn udp_write(udp: &UdpSocket, writeable: &mut bool, remote: &SocketAddr, packet: &[u8]) -> bool {
-    match udp.send_to(packet, remote) {
+    match udp.send_to(packet, *remote) {
         Ok(_) => true,
         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
             *writeable = false;
