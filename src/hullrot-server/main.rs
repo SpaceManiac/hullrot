@@ -65,9 +65,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     for arg in std::env::args().skip(1) {
         if arg == "-h" || arg == "--help" || arg == "-V" || arg == "--version" {
-            return Ok(usage());
+            return {
+                usage();
+                Ok(())
+            };
         } else if arg == "--license-mumble" {
-            return Ok(mumble_license());
+            return {
+                mumble_license();
+                Ok(())
+            };
         }
         config_path_owned = std::path::PathBuf::from(arg);
         config_path = &config_path_owned;
@@ -410,7 +416,7 @@ impl<'cfg> Server<'cfg> {
                             auth_db.set(&cert_hash, &ckey);
                         } else {
                             self.write_queue.push_back(ControlOut::BadRegistration {
-                                ckey: ckey,
+                                ckey,
                             });
                         }
                     }
@@ -422,7 +428,7 @@ impl<'cfg> Server<'cfg> {
                     });
                 }; else {
                     self.write_queue.push_back(ControlOut::IsConnected {
-                        ckey: ckey,
+                        ckey,
                         connected: false,
                     });
                 }),
@@ -853,7 +859,7 @@ impl<'cfg> Client<'cfg> {
             other.kick("Logged in from another client");
             self.session = replace(&mut other.session, 0);
 
-            self.mob = replace(&mut other.mob, Default::default());
+            self.mob = std::mem::take(&mut other.mob);
         });
 
         others.for_each(|other| {

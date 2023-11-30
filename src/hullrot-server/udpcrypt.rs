@@ -260,7 +260,7 @@ fn xor(dst: &mut Keyblock, a: &Keyblock, b: &Keyblock) {
 #[inline]
 fn xor_self(dst: &mut Keyblock, b: &Keyblock) {
     for (dst_i, b_i) in dst.iter_mut().zip(b) {
-        *dst_i = *dst_i ^ *b_i;
+        *dst_i ^= *b_i;
     }
 }
 

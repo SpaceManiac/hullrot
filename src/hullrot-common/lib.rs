@@ -102,7 +102,7 @@ impl BufWriter {
     pub fn with_capacity(cap: usize) -> BufWriter {
         BufWriter {
             buf: Vec::with_capacity(cap),
-            cap: cap,
+            cap,
             writable: false,
         }
     }
@@ -180,7 +180,7 @@ impl<'b, 'w, W: Write + ?Sized + 'w> Write for BufWriterWith<'b, 'w, W> {
         }
         // Our buffer will have been completely flushed if there's been no
         // `WouldBlock`. In that case, a big write gets written now.
-        if buf.len() >= self.buf.buf.capacity() && self.buf.buf.len() == 0 {
+        if buf.len() >= self.buf.buf.capacity() && self.buf.buf.is_empty() {
             match self.inner.write(buf) {
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                     Write::write(&mut self.buf.buf, buf)

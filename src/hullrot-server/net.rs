@@ -279,8 +279,8 @@ pub fn server_thread(init: Init, config: &Config) {
                                 for (k, connection) in clients.iter_mut() {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
                                         if let Some(decrypted) = crypt.decrypt(buf, &mut udp_crypt_buf) {
-                                            connection.udp_remote = Some(remote.clone());
-                                            udp_clients.insert(remote, k.clone());
+                                            connection.udp_remote = Some(remote);
+                                            udp_clients.insert(remote, *k);
                                             read_voice(decrypted, &mut connection.client, &mut connection.decoder, true)?;
                                             break;
                                         }
@@ -443,7 +443,7 @@ pub fn server_thread(init: Init, config: &Config) {
                                     let _ = write_varint(encoded, who as i64);  // session of source user
                                     let _ = write_varint(encoded, seq);  // sequence number
                                     let _ = write_varint(encoded, (audio.len() | if end { 0x2000 } else { 0 }) as i64);  // opus header
-                                    encoded.write_all(&audio).unwrap();
+                                    encoded.write_all(audio).unwrap();
                                 });
 
                                 // Outside the closure for borrow coherency
@@ -457,8 +457,8 @@ pub fn server_thread(init: Init, config: &Config) {
                                     if udp_valid {
                                         if let Some(remote) = udp_remote {
                                             if let Some(crypt) = crypt {
-                                                let encrypted = crypt.encrypt(&datagram, &mut udp_crypt_buf);
-                                                udp_queue(&udp, &mut udp_writeable, &mut udp_out_queue, &remote, encrypted);
+                                                let encrypted = crypt.encrypt(datagram, &mut udp_crypt_buf);
+                                                udp_queue(&udp, &mut udp_writeable, &mut udp_out_queue, remote, encrypted);
                                             }
                                         }
                                     }
@@ -470,8 +470,8 @@ pub fn server_thread(init: Init, config: &Config) {
                                         let _ = header.write_u32::<BigEndian>(datagram.len() as u32);  // Length
                                     });
 
-                                    out.write_all(&tunnel_header)?;
-                                    out.write_all(&datagram)?;
+                                    out.write_all(tunnel_header)?;
+                                    out.write_all(datagram)?;
                                     Ok(())
                                 })() {
                                     io_error(&mut connection.client, e);
@@ -488,8 +488,8 @@ pub fn server_thread(init: Init, config: &Config) {
                                 // Check if we're good to transmit over UDP
                                 if let Some(remote) = connection.udp_remote.as_ref() {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
-                                        let encrypted = crypt.encrypt(&datagram, &mut udp_crypt_buf);
-                                        udp_queue(&udp, &mut udp_writeable, &mut udp_out_queue, &remote, encrypted);
+                                        let encrypted = crypt.encrypt(datagram, &mut udp_crypt_buf);
+                                        udp_queue(&udp, &mut udp_writeable, &mut udp_out_queue, remote, encrypted);
                                     }
                                 }
 
@@ -531,12 +531,10 @@ pub fn server_thread(init: Init, config: &Config) {
 }
 
 fn udp_queue(udp: &UdpSocket, writeable: &mut bool, udp_out_queue: &mut VecDeque<(SocketAddr, Vec<u8>)>, remote: &SocketAddr, packet: &[u8]) {
-    if *writeable {
-        if udp_write(udp, writeable, remote, packet) {
-            return;
-        }
+    if *writeable && udp_write(udp, writeable, remote, packet) {
+        return;
     }
-    udp_out_queue.push_back((remote.clone(), packet.to_vec()));
+    udp_out_queue.push_back((*remote, packet.to_vec()));
 }
 
 fn udp_write(udp: &UdpSocket, writeable: &mut bool, remote: &SocketAddr, packet: &[u8]) -> bool {
