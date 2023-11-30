@@ -16,7 +16,7 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 // ----------------------------------------------------------------------------
 // Buffered I/O helpers
 
-use std::io::{self, Read, Write, BufRead};
+use std::io::{self, BufRead, Read, Write};
 
 const DEFAULT_BUF_SIZE: usize = 8 * 1024;
 
@@ -47,7 +47,10 @@ impl BufReader {
     }
 
     pub fn with<'b, 'r, R: ?Sized>(&'b mut self, read: &'r mut R) -> BufReaderWith<'b, 'r, R> {
-        BufReaderWith { buf: self, inner: read }
+        BufReaderWith {
+            buf: self,
+            inner: read,
+        }
     }
 }
 
@@ -134,7 +137,10 @@ impl BufWriter {
         self.writable
     }
 
-    pub fn with<'b, 'w, W: Write + ?Sized>(&'b mut self, write: &'w mut W) -> BufWriterWith<'b, 'w, W> {
+    pub fn with<'b, 'w, W: Write + ?Sized>(
+        &'b mut self,
+        write: &'w mut W,
+    ) -> BufWriterWith<'b, 'w, W> {
         BufWriterWith {
             buf: self,
             inner: write,
@@ -152,7 +158,9 @@ impl<'b, 'w, W: Write + ?Sized + 'w> BufWriterWith<'b, 'w, W> {
         let mut written = 0;
         let len = self.buf.buf.len();
         let mut ret = Ok(());
-        if len == 0 { return ret }
+        if len == 0 {
+            return ret;
+        }
         //println!("flush_buf({})", len);
         while written < len {
             let r = self.inner.write(&self.buf.buf[written..]);
@@ -168,7 +176,10 @@ impl<'b, 'w, W: Write + ?Sized + 'w> BufWriterWith<'b, 'w, W> {
                     self.buf.writable = false;
                     break;
                 }
-                Err(e) => { ret = Err(e); break }
+                Err(e) => {
+                    ret = Err(e);
+                    break;
+                }
             }
         }
         if written > 0 {
@@ -197,7 +208,7 @@ impl<'b, 'w, W: Write + ?Sized + 'w> Write for BufWriterWith<'b, 'w, W> {
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                     Write::write(&mut self.buf.buf, buf)
                 }
-                other => other
+                other => other,
             }
         } else {
             Write::write(&mut self.buf.buf, buf)

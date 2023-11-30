@@ -14,23 +14,24 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 //! The foreign-function interface for hosting and updating state within BYOND.
+extern crate byteorder;
 extern crate libc;
 extern crate mio;
-extern crate byteorder;
 extern crate serde;
 extern crate serde_json;
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 
 extern crate hullrot_common;
 
+use libc::{c_char, c_int};
 use std::cell::RefCell;
+use std::io::{self, BufRead, Write};
 use std::sync::mpsc;
-use std::io::{self, Write, BufRead};
-use libc::{c_int, c_char};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use mio::*;
 use mio::net::*;
+use mio::*;
 use serde::Serialize;
 
 // ----------------------------------------------------------------------------
@@ -65,7 +66,9 @@ fn error<T: AsRef<str>>(msg: T) -> *const c_char {
     struct Error<'a> {
         error: &'a str,
     }
-    json_response(&Error { error: msg.as_ref() })
+    json_response(&Error {
+        error: msg.as_ref(),
+    })
 }
 
 fn ok() -> *const c_char {
@@ -73,14 +76,12 @@ fn ok() -> *const c_char {
 }
 
 fn with_handle<F: FnOnce(&mut Handle) -> *const c_char>(f: F) -> *const c_char {
-    HANDLE.with(|cell| {
-        match cell.try_borrow_mut() {
-            Ok(mut opt) => match *opt {
-                Some(ref mut handle) => f(handle),
-                None => error("not initialized"),
-            },
-            Err(_) => error("context crashed"),
-        }
+    HANDLE.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut opt) => match *opt {
+            Some(ref mut handle) => f(handle),
+            None => error("not initialized"),
+        },
+        Err(_) => error("context crashed"),
     })
 }
 
@@ -201,7 +202,11 @@ impl Handle {
         let (control_tx, control_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let thread = std::thread::spawn(|| control_thread(init, control_rx, event_tx));
-        Ok(Handle { thread, tx: control_tx, rx: event_rx })
+        Ok(Handle {
+            thread,
+            tx: control_tx,
+            rx: event_rx,
+        })
     }
 
     /// Stop the network thread and block until it finishes or crashes.
@@ -221,12 +226,20 @@ fn init_control(addr: &str) -> Result<Init, Box<dyn std::error::Error>> {
     let poll = Poll::new()?;
     let addr = addr.parse()?;
     let mut stream = TcpStream::connect(addr)?;
-    poll.registry().register(&mut stream, CLIENT, Interest::READABLE | Interest::WRITABLE)?;
+    poll.registry()
+        .register(&mut stream, CLIENT, Interest::READABLE | Interest::WRITABLE)?;
     Ok(Init { poll, stream })
 }
 
-fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mpsc::Sender<Vec<u8>>) {
-    let Init { mut poll, mut stream } = init;
+fn control_thread(
+    init: Init,
+    control_rx: mpsc::Receiver<Vec<u8>>,
+    event_tx: mpsc::Sender<Vec<u8>>,
+) {
+    let Init {
+        mut poll,
+        mut stream,
+    } = init;
     let mut events = Events::with_capacity(1024);
 
     let mut read_buf = hullrot_common::BufReader::new();
@@ -244,8 +257,8 @@ fn control_thread(init: Init, control_rx: mpsc::Receiver<Vec<u8>>, event_tx: mps
             }
             if event.is_readable() {
                 match read_packets(&mut read_buf.with(&mut stream), &event_tx) {
-                    Ok(()) => {},
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
+                    Ok(()) => {}
+                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
                     Err(e) => return control_fatal(&event_tx, &e.to_string()),
                 }
             }
@@ -297,7 +310,10 @@ fn control_fatal(event_tx: &mpsc::Sender<Vec<u8>>, text: &str) {
     let _ = event_tx.send(buf);
 }
 
-fn read_packets<R: BufRead + ?Sized>(read: &mut R, event_tx: &mpsc::Sender<Vec<u8>>) -> io::Result<()> {
+fn read_packets<R: BufRead + ?Sized>(
+    read: &mut R,
+    event_tx: &mpsc::Sender<Vec<u8>>,
+) -> io::Result<()> {
     loop {
         let mut consumed = 0;
         {
@@ -309,7 +325,7 @@ fn read_packets<R: BufRead + ?Sized>(read: &mut R, event_tx: &mpsc::Sender<Vec<u
             while buffer.len() >= 4 {
                 let len = 4 + (&buffer[..]).read_u32::<BigEndian>()? as usize;
                 if buffer.len() < len {
-                    break;  // incomplete
+                    break; // incomplete
                 }
                 let _ = event_tx.send(buffer[4..len].to_owned());
                 consumed += len;

@@ -13,9 +13,10 @@ You should have received a copy of the GNU Affero General Public License
 along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-pub extern crate protobuf;
 extern crate byteorder;
-#[macro_use] extern crate bitflags;
+pub extern crate protobuf;
+#[macro_use]
+extern crate bitflags;
 
 use byteorder::{BigEndian, WriteBytesExt};
 use protobuf::Message;

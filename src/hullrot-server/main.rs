@@ -15,15 +15,16 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Hullrot is a minimalist Mumble server designed for immersive integration
 //! with the roleplaying spaceman simulator Space Station 13.
-extern crate mio;
-extern crate openssl;
 extern crate byteorder;
+extern crate mio;
 extern crate mumble_protocol;
+extern crate openssl;
 extern crate opus;
 extern crate serde;
 extern crate serde_json;
 extern crate toml;
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 
 extern crate hullrot_common;
 
@@ -35,17 +36,17 @@ macro_rules! packet {
     }}
 }
 
-pub mod net;
-mod deser;
 mod config;
+mod deser;
+pub mod net;
 mod udpcrypt;
 
-use std::mem::replace;
-use std::collections::{VecDeque, HashMap, HashSet};
-use std::time::{Instant, Duration};
 use std::borrow::Cow;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter::once;
+use std::mem::replace;
 use std::str::FromStr;
+use std::time::{Duration, Instant};
 
 use mumble_protocol::Permissions;
 
@@ -85,9 +86,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn usage() {
-    println!("{} v{} - {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_DESCRIPTION"));
+    println!(
+        "{} v{} - {}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_DESCRIPTION")
+    );
     println!("Copyright (C) 2017-2018  {}", env!("CARGO_PKG_AUTHORS"));
-    println!("
+    println!(
+        "
 usage: hullrot [<config-file>]
     -h, --help, -V, --version
         show this help
@@ -105,7 +112,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU Affero General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License
-along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.");
+along with Hullrot.  If not, see <http://www.gnu.org/licenses/>."
+    );
 }
 
 fn mumble_license() {
@@ -156,27 +164,24 @@ enum ControlIn {
     Debug(String),
 
     /// Server will enable/disable location-based talk restrictions.
-    Playing(#[serde(deserialize_with="deser::as_bool")] bool),
+    Playing(#[serde(deserialize_with = "deser::as_bool")] bool),
 
     /// Server will update Z-level interlinkage.
     ///
     /// Mapping should be from stringified Z-level to group number, e.g.
     /// `{"2": 1, "5": 1}` to indicate Z-levels 2 and 5 are connected.
-    Linkage(#[serde(deserialize_with="deser::as_map")] HashMap<String, ZGroup>),
+    Linkage(#[serde(deserialize_with = "deser::as_map")] HashMap<String, ZGroup>),
 
     /// Server will update the ckey's mob state according to the patch.
     PatchMobState {
         ckey: String,
-        #[serde(flatten)]  // fields on MobStatePatch appear here directly
+        #[serde(flatten)] // fields on MobStatePatch appear here directly
         patch: MobStatePatch,
     },
 
     /// Server will update whether the ckey is holding push-to-talk on the
     /// given frequency.
-    SetPTT {
-        who: String,
-        freq: Option<Freq>,
-    },
+    SetPTT { who: String, freq: Option<Freq> },
 
     /// Server will set the given ckey to observer mode, able to understand
     /// all languages and hear anything they are in range of.
@@ -186,16 +191,11 @@ enum ControlIn {
     /// certificate hash.
     ///
     /// Requires that an unauthenticated client with that hash is connected.
-    Register {
-        cert_hash: String,
-        ckey: String,
-    },
+    Register { cert_hash: String, ckey: String },
 
     /// Server will send `IsConnected` indicating whether there is an authed
     /// client with the given ckey.
-    CheckConnected {
-        ckey: String,
-    },
+    CheckConnected { ckey: String },
 }
 
 /// Messages that Hullrot may send to the game.
@@ -232,31 +232,21 @@ enum ControlOut {
 
     /// Game should update speech bubble display such that only ckeys in `with`
     /// can see the speech bubble belonging to `who`.
-    SpeechBubble {
-        who: String,
-        with: Vec<String>,
-    },
+    SpeechBubble { who: String, with: Vec<String> },
 
     /// Game should show a message to the given ckey indicating they are mute.
     CannotSpeak(String),
 
     /// Game may show a message to a player matching the given username,
     /// prompting them to authenticate.
-    NeedsRegistration {
-        untrusted_username: String,
-    },
+    NeedsRegistration { untrusted_username: String },
 
     /// Game should show a message to the given ckey indicating that their
     /// registration attempt failed.
-    BadRegistration {
-        ckey: String,
-    },
+    BadRegistration { ckey: String },
 
     /// Sent in response to `CheckConnected`.
-    IsConnected {
-        ckey: String,
-        connected: bool,
-    },
+    IsConnected { ckey: String, connected: bool },
 }
 
 #[derive(Debug, Default)]
@@ -377,8 +367,11 @@ impl<'cfg> Server<'cfg> {
                 ControlIn::Debug(msg) => println!("CONTROL dbg: {}", msg),
                 ControlIn::Playing(playing) => self.playing = playing,
                 ControlIn::Linkage(map) => {
-                    self.linkage = map.into_iter().map(|(k, v)| (k.parse().unwrap(), v)).collect();
-                },
+                    self.linkage = map
+                        .into_iter()
+                        .map(|(k, v)| (k.parse().unwrap(), v))
+                        .collect();
+                }
                 ControlIn::PatchMobState { ckey, patch } => with_client!(ckey; |c| {
                     c.mob.apply(patch);
                 }),
@@ -400,8 +393,13 @@ impl<'cfg> Server<'cfg> {
                     if let Some(ref auth_db) = self.config.auth_db {
                         let mut applied = false;
                         _clients.for_each(|c| match c.auth_state {
-                            AuthState::CertKnown { cert_hash: ref theirs } |
-                            AuthState::UsernameKnown { cert_hash: ref theirs, .. } => {
+                            AuthState::CertKnown {
+                                cert_hash: ref theirs,
+                            }
+                            | AuthState::UsernameKnown {
+                                cert_hash: ref theirs,
+                                ..
+                            } => {
                                 if !applied && cert_hash == *theirs {
                                     c.events.push_back(net::Command::AuthCkey(ckey.to_owned()));
                                     applied = true;
@@ -412,12 +410,11 @@ impl<'cfg> Server<'cfg> {
                         if applied {
                             auth_db.set(&cert_hash, &ckey);
                         } else {
-                            self.write_queue.push_back(ControlOut::BadRegistration {
-                                ckey,
-                            });
+                            self.write_queue
+                                .push_back(ControlOut::BadRegistration { ckey });
                         }
                     }
-                },
+                }
                 ControlIn::CheckConnected { ckey } => with_client!(ckey; |_c| {
                     self.write_queue.push_back(ControlOut::IsConnected {
                         ckey: ckey.to_owned(),
@@ -437,14 +434,18 @@ impl<'cfg> Server<'cfg> {
         let now = Instant::now();
         self.dedup.retain(|_, v| *v >= now);
         if !self.dedup.contains_key(&message) {
-            self.dedup.insert(message.clone(), now + Duration::from_millis(ms));
+            self.dedup
+                .insert(message.clone(), now + Duration::from_millis(ms));
             self.write_queue.push_back(message);
         }
     }
 }
 
 fn ckey(name: &str) -> String {
-    name.chars().filter(|c| c.is_ascii() && c.is_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect()
+    name.chars()
+        .filter(|c| c.is_ascii() && c.is_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
 }
 
 #[derive(Debug)]
@@ -463,14 +464,19 @@ pub struct Client<'cfg> {
     auth_state: AuthState,
 
     speaking: bool,  // whether our speech bubble is currently being shown
-    self_deaf: bool,  // deafened in the Mumble client
+    self_deaf: bool, // deafened in the Mumble client
     /// Disables location-based restriction when z == 0 (observer)
     ghost_ears: bool,
     mob: MobState,
 }
 
 impl<'cfg> Client<'cfg> {
-    fn new(config: &'cfg Config, remote: std::net::SocketAddr, sender: net::PacketChannel, session: u32) -> Client {
+    fn new(
+        config: &'cfg Config,
+        remote: std::net::SocketAddr,
+        sender: net::PacketChannel,
+        session: u32,
+    ) -> Client {
         sender.send(packet! { Version;
             set_version: 0x10300,
             set_release: concat!("Hullrot v", env!("CARGO_PKG_VERSION")).to_owned(),
@@ -562,7 +568,9 @@ impl<'cfg> Client<'cfg> {
                     let hash = if let Some(hash) = hash {
                         hash
                     } else {
-                        return self.kick("Authentication enabled: your Mumble client must provide a certificate");
+                        return self.kick(
+                            "Authentication enabled: your Mumble client must provide a certificate",
+                        );
                     };
 
                     if let Some(ckey) = auth_db.get(&hash) {
@@ -571,10 +579,10 @@ impl<'cfg> Client<'cfg> {
                         println!("{} has unrecognized cert hash {:?}", self, hash);
                         self.auth_cert_hash(hash);
                     }
-                },
+                }
                 Command::AuthCkey(ckey) => {
                     self.auth_ckey(ckey, server, others.reborrow());
-                },
+                }
                 Command::Packet(Packet::Authenticate(auth)) => {
                     // Accept the username
                     let name = auth.get_username();
@@ -629,98 +637,147 @@ impl<'cfg> Client<'cfg> {
                         set_max_users: 100,
                         set_welcome_text: WELCOME.to_owned(),
                     });
-                },
+                }
                 Command::Packet(Packet::UserState(ref state)) => {
                     if state.has_self_deaf() {
                         self.self_deaf = state.get_self_deaf();
                     }
-                },
+                }
                 Command::Packet(Packet::UserRemove(ref remove)) if self.admin => {
                     let session = remove.get_session();
-                    others.for_each(|other| if other.session == session {
-                        other.kick(format!("Kicked by {}: {}", self, remove.get_reason()));
+                    others.for_each(|other| {
+                        if other.session == session {
+                            other.kick(format!("Kicked by {}: {}", self, remove.get_reason()));
+                        }
                     });
-                },
-                Command::Packet(_) => {},
+                }
+                Command::Packet(_) => {}
                 Command::VoiceData { seq, audio, end } => {
                     if !server.playing {
                         // no server connection or pre/post-game
                         others.for_each(|other| {
-                            if other.self_deaf { return }
+                            if other.self_deaf {
+                                return;
+                            }
                             other.sender.send_voice(self.session, seq, audio.clone());
                         });
                         self.unspeak(server);
                         continue;
                     }
 
-                    let ckey = if let Some(ckey) = self.ckey() { ckey.to_owned() } else { continue };
+                    let ckey = if let Some(ckey) = self.ckey() {
+                        ckey.to_owned()
+                    } else {
+                        continue;
+                    };
 
-                    if self.mob.mute {  // bodily mute
-                        server.write_with_cooldown(10_000, ControlOut::CannotSpeak(ckey.to_owned()));
+                    if self.mob.mute {
+                        // bodily mute
+                        server
+                            .write_with_cooldown(10_000, ControlOut::CannotSpeak(ckey.to_owned()));
                         self.unspeak(server);
                         continue;
                     }
 
                     // Transmit to anyone who can hear us
                     others.for_each(|other| {
-                        if other.self_deaf || other.mob.deaf { return }
-                        let other_ckey = if let Some(ckey) = other.ckey() { ckey } else { return };
+                        if other.self_deaf || other.mob.deaf {
+                            return;
+                        }
+                        let other_ckey = if let Some(ckey) = other.ckey() {
+                            ckey
+                        } else {
+                            return;
+                        };
 
                         let mut heard = false;
                         if self.mob.local_with.contains(other_ckey) {
                             heard = true;
-                            server.write_with_cooldown(10_000, ControlOut::Hear {
-                                hearer: other_ckey.to_owned(),
-                                speaker: ckey.to_owned(),
-                                freq: None,
-                                language: self.mob.current_language.to_owned(),
-                            });
+                            server.write_with_cooldown(
+                                10_000,
+                                ControlOut::Hear {
+                                    hearer: other_ckey.to_owned(),
+                                    speaker: ckey.to_owned(),
+                                    freq: None,
+                                    language: self.mob.current_language.to_owned(),
+                                },
+                            );
                         }
 
-                        let shared_z = other.ghost() || server.linkage.get(&self.mob.z)
-                            .and_then(|&a| server.linkage.get(&other.mob.z).map(|&b| (a, b)))
-                            .map_or(self.mob.z == other.mob.z, |(a, b)| a == b);
+                        let shared_z = other.ghost()
+                            || server
+                                .linkage
+                                .get(&self.mob.z)
+                                .and_then(|&a| server.linkage.get(&other.mob.z).map(|&b| (a, b)))
+                                .map_or(self.mob.z == other.mob.z, |(a, b)| a == b);
                         if shared_z {
                             let ptt_heard = match self.mob.push_to_talk {
                                 Some(freq) if other.mob.hear_freqs.contains(&freq) => Some(freq),
                                 _ => None,
                             };
-                            for freq in self.mob.hot_freqs.intersection(&other.mob.hear_freqs).cloned().chain(ptt_heard) {
+                            for freq in self
+                                .mob
+                                .hot_freqs
+                                .intersection(&other.mob.hear_freqs)
+                                .cloned()
+                                .chain(ptt_heard)
+                            {
                                 heard = true;
-                                server.write_with_cooldown(10_000, ControlOut::Hear {
-                                    hearer: other_ckey.to_owned(),
-                                    speaker: ckey.to_owned(),
-                                    freq: Some(freq),
-                                    language: self.mob.current_language.to_owned(),
-                                });
+                                server.write_with_cooldown(
+                                    10_000,
+                                    ControlOut::Hear {
+                                        hearer: other_ckey.to_owned(),
+                                        speaker: ckey.to_owned(),
+                                        freq: Some(freq),
+                                        language: self.mob.current_language.to_owned(),
+                                    },
+                                );
                             }
                         }
                         if other.ghost() && other.ghost_ears {
                             heard = true;
                         }
-                        if heard && (other.mob.known_languages.contains(&self.mob.current_language) || other.ghost()) {
+                        if heard
+                            && (other
+                                .mob
+                                .known_languages
+                                .contains(&self.mob.current_language)
+                                || other.ghost())
+                        {
                             other.sender.send_voice(self.session, seq, audio.to_owned());
                         }
                     });
 
                     // Let us know if we cannot hear ourselves
                     if self.mob.deaf {
-                        server.write_with_cooldown(10_000, ControlOut::HearSelf {
-                            who: ckey.to_owned(),
-                            freq: None,
-                            language: self.mob.current_language.to_owned(),
-                        });
+                        server.write_with_cooldown(
+                            10_000,
+                            ControlOut::HearSelf {
+                                who: ckey.to_owned(),
+                                freq: None,
+                                language: self.mob.current_language.to_owned(),
+                            },
+                        );
                     }
                     let ptt_hear_self = match self.mob.push_to_talk {
                         Some(freq) if self.mob.hear_freqs.contains(&freq) => Some(freq),
                         _ => None,
                     };
-                    for freq in self.mob.hot_freqs.intersection(&self.mob.hear_freqs).cloned().chain(ptt_hear_self) {
-                        server.write_with_cooldown(10_000, ControlOut::HearSelf {
-                            who: ckey.to_owned(),
-                            freq: Some(freq),
-                            language: self.mob.current_language.to_owned(),
-                        });
+                    for freq in self
+                        .mob
+                        .hot_freqs
+                        .intersection(&self.mob.hear_freqs)
+                        .cloned()
+                        .chain(ptt_hear_self)
+                    {
+                        server.write_with_cooldown(
+                            10_000,
+                            ControlOut::HearSelf {
+                                who: ckey.to_owned(),
+                                freq: Some(freq),
+                                language: self.mob.current_language.to_owned(),
+                            },
+                        );
                     }
 
                     // Show or hide speech bubbles
@@ -730,7 +787,13 @@ impl<'cfg> Client<'cfg> {
                         self.speaking = true;
                         server.write_queue.push_back(ControlOut::SpeechBubble {
                             who: ckey.to_owned(),
-                            with: self.mob.local_with.iter().cloned().chain(once(ckey.to_owned())).collect(),
+                            with: self
+                                .mob
+                                .local_with
+                                .iter()
+                                .cloned()
+                                .chain(once(ckey.to_owned()))
+                                .collect(),
                         });
                     }
                 }
@@ -742,7 +805,10 @@ impl<'cfg> Client<'cfg> {
         let mut permissions = Permissions::TRAVERSE | Permissions::SPEAK;
         if self.admin {
             // Note: most of these don't actually do anything.
-            permissions |= Permissions::KICK | Permissions::REGISTER | Permissions::REGISTER_SELF | Permissions::ENTER;
+            permissions |= Permissions::KICK
+                | Permissions::REGISTER
+                | Permissions::REGISTER_SELF
+                | Permissions::ENTER;
         }
         permissions
     }
@@ -782,23 +848,13 @@ enum AuthState {
     // AuthDB disabled
     AuthDisabled,
     // Cert hash is known, but user has no ckey
-    CertKnown {
-        cert_hash: String,
-    },
+    CertKnown { cert_hash: String },
     // Cert hash has been matched to ckey
-    CkeyKnown {
-        ckey: String,
-    },
+    CkeyKnown { ckey: String },
     // Preferred name and hash are known
-    UsernameKnown {
-        cert_hash: String,
-        username: String,
-    },
+    UsernameKnown { cert_hash: String, username: String },
     // Actively chatting
-    Active {
-        ckey: String,
-        username: String,
-    },
+    Active { ckey: String, username: String },
     Errored,
 }
 
@@ -806,14 +862,20 @@ impl<'cfg> Client<'cfg> {
     fn auth_disabled(&mut self) {
         self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
             AuthState::Initial => AuthState::AuthDisabled,
-            _ => { self.kick("Authentication flow error"); AuthState::Errored }
+            _ => {
+                self.kick("Authentication flow error");
+                AuthState::Errored
+            }
         };
     }
 
     fn auth_cert_hash(&mut self, cert_hash: String) {
         self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
             AuthState::Initial => AuthState::CertKnown { cert_hash },
-            _ => { self.kick("Authentication flow error"); AuthState::Errored }
+            _ => {
+                self.kick("Authentication flow error");
+                AuthState::Errored
+            }
         };
     }
 
@@ -821,37 +883,67 @@ impl<'cfg> Client<'cfg> {
         self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
             AuthState::Initial => AuthState::CkeyKnown { ckey },
             AuthState::CertKnown { cert_hash: _ } => AuthState::CkeyKnown { ckey },
-            AuthState::UsernameKnown { cert_hash: _, username } => self.authenticated(ckey, username, server, others),
-            _ => { self.kick("Authentication flow error"); AuthState::Errored }
+            AuthState::UsernameKnown {
+                cert_hash: _,
+                username,
+            } => self.authenticated(ckey, username, server, others),
+            _ => {
+                self.kick("Authentication flow error");
+                AuthState::Errored
+            }
         };
     }
 
     fn auth_username(&mut self, username: String, server: &mut Server, others: net::Everyone) {
         // TODO: allow game to override player but not the other way around
         self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
-            AuthState::UsernameKnown { cert_hash, username: _ } => AuthState::UsernameKnown { cert_hash, username },
+            AuthState::UsernameKnown {
+                cert_hash,
+                username: _,
+            } => AuthState::UsernameKnown {
+                cert_hash,
+                username,
+            },
             AuthState::CertKnown { cert_hash } => {
                 server.write_queue.push_back(ControlOut::NeedsRegistration {
-                    untrusted_username: username.to_owned()
+                    untrusted_username: username.to_owned(),
                 });
                 self.sender.send(packet! { TextMessage;
                     set_message: format!("<b>Copy-paste this code in-game to authenticate</b>:<br>{}", cert_hash),
                 });
-                AuthState::UsernameKnown { cert_hash, username }
-            },
+                AuthState::UsernameKnown {
+                    cert_hash,
+                    username,
+                }
+            }
             AuthState::CkeyKnown { ckey } => self.authenticated(ckey, username, server, others),
-            AuthState::AuthDisabled => self.authenticated(ckey(&username), username, server, others),
+            AuthState::AuthDisabled => {
+                self.authenticated(ckey(&username), username, server, others)
+            }
             AuthState::Active { ckey, username: _ } => AuthState::Active { ckey, username },
-            _ => { self.kick("Authentication flow error"); AuthState::Errored }
+            _ => {
+                self.kick("Authentication flow error");
+                AuthState::Errored
+            }
         };
     }
 
-    fn authenticated(&mut self, ckey: String, username: String, server: &mut Server, mut others: net::Everyone) -> AuthState {
+    fn authenticated(
+        &mut self,
+        ckey: String,
+        username: String,
+        server: &mut Server,
+        mut others: net::Everyone,
+    ) -> AuthState {
         println!("{} authenticated as {}", self, ckey);
-        server.write_queue.push_back(ControlOut::Refresh(ckey.to_owned()));
+        server
+            .write_queue
+            .push_back(ControlOut::Refresh(ckey.to_owned()));
 
         others.for_each(|other| {
-            if other.ckey() != Some(&ckey[..]) { return }
+            if other.ckey() != Some(&ckey[..]) {
+                return;
+            }
             println!("{} inherited from {}", self, other);
             other.kick("Logged in from another client");
             self.session = replace(&mut other.session, 0);
@@ -860,7 +952,11 @@ impl<'cfg> Client<'cfg> {
         });
 
         others.for_each(|other| {
-            if let AuthState::Active { username: ref their_username, .. } = other.auth_state {
+            if let AuthState::Active {
+                username: ref their_username,
+                ..
+            } = other.auth_state
+            {
                 other.sender.send(packet! { UserState;
                     set_session: self.session,
                     set_channel_id: 0,

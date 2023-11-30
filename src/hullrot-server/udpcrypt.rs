@@ -32,7 +32,7 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
  * OCB with something else or get yourself a license.
  */
 
-use openssl::symm::{Crypter, Cipher, Mode};
+use openssl::symm::{Cipher, Crypter, Mode};
 
 const AES_KEY_SIZE_BYTES: usize = 16;
 const AES_BLOCK_SIZE: usize = 16;
@@ -69,7 +69,11 @@ impl CryptState {
         CryptState::from_parameters(raw_key, encrypt_iv, decrypt_iv)
     }
 
-    fn from_parameters(raw_key: [u8; AES_KEY_SIZE_BYTES], encrypt_iv: [u8; AES_BLOCK_SIZE], decrypt_iv: [u8; AES_BLOCK_SIZE]) -> CryptState {
+    fn from_parameters(
+        raw_key: [u8; AES_KEY_SIZE_BYTES],
+        encrypt_iv: [u8; AES_BLOCK_SIZE],
+        decrypt_iv: [u8; AES_BLOCK_SIZE],
+    ) -> CryptState {
         let cipher = Cipher::aes_128_ecb();
         let encrypt_key = Crypter::new(cipher, Mode::Encrypt, &raw_key, None).unwrap();
 
@@ -107,7 +111,13 @@ impl CryptState {
         // First, increase our IV.
         increment_iv(&mut self.encrypt_iv);
 
-        ocb_encrypt(&mut self.encrypt_key, source, &mut dst[4..4 + source.len()], &self.encrypt_iv, &mut tag);
+        ocb_encrypt(
+            &mut self.encrypt_key,
+            source,
+            &mut dst[4..4 + source.len()],
+            &self.encrypt_iv,
+            &mut tag,
+        );
 
         dst[0] = self.encrypt_iv[0];
         dst[1] = tag[0];
@@ -159,11 +169,15 @@ impl CryptState {
                 restore = true;
             } else if ivbyte > self.decrypt_iv[0] && diff > 0 {
                 // Lost a few packets, but beyond that we're good.
-                lost = (ivbyte as u32).wrapping_sub(self.decrypt_iv[0] as u32).wrapping_sub(1);
+                lost = (ivbyte as u32)
+                    .wrapping_sub(self.decrypt_iv[0] as u32)
+                    .wrapping_sub(1);
                 self.decrypt_iv[0] = ivbyte;
             } else if ivbyte < self.decrypt_iv[0] && diff > 0 {
                 // Lost a few packets, and wrapped around.
-                lost = 255u32.wrapping_sub(self.decrypt_iv[0] as u32).wrapping_add(ivbyte as u32);
+                lost = 255u32
+                    .wrapping_sub(self.decrypt_iv[0] as u32)
+                    .wrapping_add(ivbyte as u32);
                 self.decrypt_iv[0] = ivbyte;
                 increment_iv(&mut self.decrypt_iv[1..]);
             } else {
@@ -177,7 +191,14 @@ impl CryptState {
         }
 
         let sliced_dst = &mut dst[..source.len() - 4];
-        ocb_decrypt(&mut self.encrypt_key, &self.raw_key, &source[4..], sliced_dst, &self.decrypt_iv, &mut tag);
+        ocb_decrypt(
+            &mut self.encrypt_key,
+            &self.raw_key,
+            &source[4..],
+            sliced_dst,
+            &self.decrypt_iv,
+            &mut tag,
+        );
 
         if tag[..3] != source[1..4] {
             self.decrypt_iv.copy_from_slice(&saveiv);
@@ -202,7 +223,10 @@ fn increment_iv(iv: &mut [u8]) {
     for each in iv.iter_mut() {
         match each.checked_add(1) {
             None => *each = 0,
-            Some(x) => { *each = x; break; }
+            Some(x) => {
+                *each = x;
+                break;
+            }
         }
     }
 }
@@ -211,7 +235,10 @@ fn decrement_iv(iv: &mut [u8]) {
     for each in iv.iter_mut() {
         match each.checked_sub(1) {
             None => *each = 255,
-            Some(x) => { *each = x; break; }
+            Some(x) => {
+                *each = x;
+                break;
+            }
         }
     }
 }
@@ -265,7 +292,7 @@ fn xor_self(dst: &mut Keyblock, b: &Keyblock) {
 #[inline]
 fn s2(block: &mut Keyblock) {
     let carry = swapped(block[0]) >> SHIFTBITS;
-    for i in 0..BLOCKSIZE-1 {
+    for i in 0..BLOCKSIZE - 1 {
         block[i] = swapped((swapped(block[i]) << 1) | (swapped(block[i + 1]) >> SHIFTBITS));
     }
     block[BLOCKSIZE - 1] = swapped((swapped(block[BLOCKSIZE - 1]) << 1) ^ (carry * 0x87));
@@ -274,7 +301,7 @@ fn s2(block: &mut Keyblock) {
 #[inline]
 fn s3(block: &mut Keyblock) {
     let carry = swapped(block[0]) >> SHIFTBITS;
-    for i in 0..BLOCKSIZE-1 {
+    for i in 0..BLOCKSIZE - 1 {
         block[i] ^= swapped((swapped(block[i]) << 1) | (swapped(block[i + 1]) >> SHIFTBITS));
     }
     block[BLOCKSIZE - 1] ^= swapped((swapped(block[BLOCKSIZE - 1]) << 1) ^ (carry * 0x87));
@@ -300,7 +327,13 @@ fn aes_decrypt(src: &Keyblock, dst: &mut Keyblock, key: &Keyblock) {
 
 use std::convert::TryInto;
 
-fn ocb_encrypt(encrypt_key: &mut Crypter, mut plain: &[u8], mut encrypted: &mut [u8], nonce: &Keyblock, tag: &mut Keyblock) {
+fn ocb_encrypt(
+    encrypt_key: &mut Crypter,
+    mut plain: &[u8],
+    mut encrypted: &mut [u8],
+    nonce: &Keyblock,
+    tag: &mut Keyblock,
+) {
     assert_eq!(plain.len(), encrypted.len());
     let mut len = plain.len();
 
@@ -314,10 +347,21 @@ fn ocb_encrypt(encrypt_key: &mut Crypter, mut plain: &[u8], mut encrypted: &mut 
 
     while len > AES_BLOCK_SIZE {
         s2(&mut delta);
-        xor(&mut tmp, &delta, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
+        xor(
+            &mut tmp,
+            &delta,
+            (&plain[..AES_BLOCK_SIZE]).try_into().unwrap(),
+        );
         aes_encrypt(&tmp, &mut pad, encrypt_key);
-        xor((&mut encrypted[..AES_BLOCK_SIZE]).try_into().unwrap(), &delta, &pad);
-        xor_self(&mut checksum, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
+        xor(
+            (&mut encrypted[..AES_BLOCK_SIZE]).try_into().unwrap(),
+            &delta,
+            &pad,
+        );
+        xor_self(
+            &mut checksum,
+            (&plain[..AES_BLOCK_SIZE]).try_into().unwrap(),
+        );
         len -= AES_BLOCK_SIZE;
         plain = &plain[AES_BLOCK_SIZE..];
         encrypted = &mut encrypted[AES_BLOCK_SIZE..];
@@ -339,7 +383,14 @@ fn ocb_encrypt(encrypt_key: &mut Crypter, mut plain: &[u8], mut encrypted: &mut 
     aes_encrypt(&tmp, tag, encrypt_key);
 }
 
-fn ocb_decrypt(encrypt_key: &mut Crypter, raw_key: &Keyblock, mut encrypted: &[u8], mut plain: &mut [u8], nonce: &Keyblock, tag: &mut Keyblock) {
+fn ocb_decrypt(
+    encrypt_key: &mut Crypter,
+    raw_key: &Keyblock,
+    mut encrypted: &[u8],
+    mut plain: &mut [u8],
+    nonce: &Keyblock,
+    tag: &mut Keyblock,
+) {
     assert_eq!(plain.len(), encrypted.len());
     let mut len = plain.len();
 
@@ -353,10 +404,21 @@ fn ocb_decrypt(encrypt_key: &mut Crypter, raw_key: &Keyblock, mut encrypted: &[u
 
     while len > AES_BLOCK_SIZE {
         s2(&mut delta);
-        xor(&mut tmp, &delta, (&encrypted[..AES_BLOCK_SIZE]).try_into().unwrap());
+        xor(
+            &mut tmp,
+            &delta,
+            (&encrypted[..AES_BLOCK_SIZE]).try_into().unwrap(),
+        );
         aes_decrypt(&tmp, &mut pad, raw_key);
-        xor((&mut plain[..AES_BLOCK_SIZE]).try_into().unwrap(), &delta, &pad);
-        xor_self(&mut checksum, (&plain[..AES_BLOCK_SIZE]).try_into().unwrap());
+        xor(
+            (&mut plain[..AES_BLOCK_SIZE]).try_into().unwrap(),
+            &delta,
+            &pad,
+        );
+        xor_self(
+            &mut checksum,
+            (&plain[..AES_BLOCK_SIZE]).try_into().unwrap(),
+        );
         len -= AES_BLOCK_SIZE;
         plain = &mut plain[AES_BLOCK_SIZE..];
         encrypted = &encrypted[AES_BLOCK_SIZE..];
@@ -381,20 +443,39 @@ fn ocb_decrypt(encrypt_key: &mut Crypter, raw_key: &Keyblock, mut encrypted: &[u
 #[test]
 fn authcrypt() {
     for len in 0..128 {
-        const RAWKEY: [u8; AES_BLOCK_SIZE] = [0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f];
-        const NONCE: [u8; AES_BLOCK_SIZE] = [0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00];
+        const RAWKEY: [u8; AES_BLOCK_SIZE] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f,
+        ];
+        const NONCE: [u8; AES_BLOCK_SIZE] = [
+            0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,
+            0x11, 0x00,
+        ];
 
         let mut cs = CryptState::from_parameters(RAWKEY, NONCE, NONCE);
 
-        let src: Vec<u8> = (1..len as u8+1).collect();
+        let src: Vec<u8> = (1..len as u8 + 1).collect();
 
         let mut enctag = [0; AES_BLOCK_SIZE];
         let mut dectag = [0; AES_BLOCK_SIZE];
         let mut encrypted = vec![0; len];
         let mut decrypted = vec![0; len];
 
-        ocb_encrypt(&mut cs.encrypt_key, &src, &mut encrypted, &NONCE, &mut enctag);
-        ocb_decrypt(&mut cs.encrypt_key, &RAWKEY, &encrypted, &mut decrypted, &NONCE, &mut dectag);
+        ocb_encrypt(
+            &mut cs.encrypt_key,
+            &src,
+            &mut encrypted,
+            &NONCE,
+            &mut enctag,
+        );
+        ocb_decrypt(
+            &mut cs.encrypt_key,
+            &RAWKEY,
+            &encrypted,
+            &mut decrypted,
+            &NONCE,
+            &mut dectag,
+        );
 
         assert_eq!(enctag, dectag);
         assert_eq!(src, decrypted);

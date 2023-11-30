@@ -16,24 +16,24 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 // Server-side implementation of the Mumble protocol, documented online:
 // https://mumble-protocol.readthedocs.io/en/latest/overview.html
 
-use std::io::{self, Read, Write, BufRead};
-use std::net::SocketAddr;
-use std::sync::mpsc;
-use std::rc::Rc;
 use std::collections::{HashMap, VecDeque};
-use std::mem;
 use std::fs;
+use std::io::{self, BufRead, Read, Write};
+use std::mem;
+use std::net::SocketAddr;
+use std::rc::Rc;
+use std::sync::mpsc;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use mio::*;
 use mio::net::*;
+use mio::*;
 use openssl::ssl::*;
-use opus::{Channels, Application, Bitrate, Decoder, Encoder};
+use opus::{Application, Bitrate, Channels, Decoder, Encoder};
 
-use mumble_protocol::Packet;
-use hullrot_common::{BufReader, BufWriter};
 use config::Config;
-use {Client, Server, ControlIn};
+use hullrot_common::{BufReader, BufWriter};
+use mumble_protocol::Packet;
+use {Client, ControlIn, Server};
 
 // ----------------------------------------------------------------------------
 // Main server thread
@@ -55,7 +55,9 @@ pub struct Init {
 pub fn init_server(config: &Config) -> Result<Init, Box<dyn std::error::Error>> {
     // TODO: audit
     let mut ctx = SslContext::builder(SslMethod::tls())?;
-    ctx.set_cipher_list("EECDH+AESGCM:EDH+aRSA+AESGCM:DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA")?;
+    ctx.set_cipher_list(
+        "EECDH+AESGCM:EDH+aRSA+AESGCM:DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA:AES256-SHA:AES128-SHA",
+    )?;
     if config.auth_db.is_some() {
         ctx.set_verify_callback(SslVerifyMode::PEER, |_preverify_ok, _store_ctx| {
             // Seems like a terrible idea, but apparently how Murmur behaves?
@@ -78,29 +80,46 @@ pub fn init_server(config: &Config) -> Result<Init, Box<dyn std::error::Error>> 
     let mumble_addr = config.mumble_addr.parse()?;
     println!("Binding tcp/{}", mumble_addr);
     let mut server = TcpListener::bind(mumble_addr)?;
-    poll.registry().register(&mut server, TCP_SERVER, Interest::READABLE)?;
+    poll.registry()
+        .register(&mut server, TCP_SERVER, Interest::READABLE)?;
 
     println!("Binding udp/{}", mumble_addr);
     let mut udp = UdpSocket::bind(mumble_addr).unwrap();
-    poll.registry().register(&mut udp, UDP_SOCKET, Interest::READABLE | Interest::WRITABLE).unwrap();
+    poll.registry()
+        .register(
+            &mut udp,
+            UDP_SOCKET,
+            Interest::READABLE | Interest::WRITABLE,
+        )
+        .unwrap();
 
     let control_addr = config.control_addr.parse()?;
     println!("Binding tcp/{}", control_addr);
     let mut control_server = TcpListener::bind(control_addr)?;
-    poll.registry().register(&mut control_server, CONTROL_SERVER, Interest::READABLE)?;
+    poll.registry()
+        .register(&mut control_server, CONTROL_SERVER, Interest::READABLE)?;
 
-    Ok(Init { ctx, poll, server, control_server, udp })
+    Ok(Init {
+        ctx,
+        poll,
+        server,
+        control_server,
+        udp,
+    })
 }
 
 #[deny(unused_must_use)]
-fn create_self_signed_cert(cert_pem: &str, key_pem: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use openssl::x509::*;
-    use openssl::x509::extension::*;
+fn create_self_signed_cert(
+    cert_pem: &str,
+    key_pem: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use openssl::asn1::Asn1Time;
+    use openssl::bn::{BigNum, MsbOption};
+    use openssl::hash::MessageDigest;
     use openssl::pkey::PKey;
     use openssl::rsa::Rsa;
-    use openssl::bn::{BigNum, MsbOption};
-    use openssl::asn1::Asn1Time;
-    use openssl::hash::MessageDigest;
+    use openssl::x509::extension::*;
+    use openssl::x509::*;
 
     // openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365
     println!("Creating default self-signed certificate");
@@ -149,9 +168,15 @@ fn create_self_signed_cert(cert_pem: &str, key_pem: &str) -> Result<(), Box<dyn 
 }
 
 pub fn server_thread(init: Init, config: &Config) {
-    let Init { ctx, mut poll, server, control_server, udp } = init;
+    let Init {
+        ctx,
+        mut poll,
+        server,
+        control_server,
+        udp,
+    } = init;
     let mut encode_buf = vec![0u8; 1024]; // Docs say this could go up to 0x7fffff (8MiB - 1B) in size
-    let mut udp_buf = [0u8; 1024];  // Mumble protocol says this is the packet size limit
+    let mut udp_buf = [0u8; 1024]; // Mumble protocol says this is the packet size limit
     let mut udp_crypt_buf = [0u8; 1024];
     let mut udp_writeable = true;
     let mut udp_out_queue = VecDeque::new();
@@ -166,7 +191,8 @@ pub fn server_thread(init: Init, config: &Config) {
 
     println!("Started");
     loop {
-        poll.poll(&mut events, Some(std::time::Duration::from_millis(5))).unwrap();
+        poll.poll(&mut events, Some(std::time::Duration::from_millis(5)))
+            .unwrap();
 
         // Check readiness events
         for event in events.iter() {
@@ -177,14 +203,19 @@ pub fn server_thread(init: Init, config: &Config) {
                         Ok(r) => r,
                         Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                        Err(e) => { println!("{:?}", e); continue },
+                        Err(e) => {
+                            println!("{:?}", e);
+                            continue;
+                        }
                     };
                     println!("({}) connected", remote);
 
                     let session = next_token;
                     let token = Token(session as usize);
                     next_token = next_token.checked_add(1).expect("token overflow");
-                    poll.registry().register(&mut stream, token, Interest::READABLE | Interest::WRITABLE).unwrap();
+                    poll.registry()
+                        .register(&mut stream, token, Interest::READABLE | Interest::WRITABLE)
+                        .unwrap();
 
                     let ssl = Ssl::new(&ctx).unwrap();
                     let stream = Stream::new(ssl.accept(stream));
@@ -196,7 +227,10 @@ pub fn server_thread(init: Init, config: &Config) {
                         Ok(r) => r,
                         Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                        Err(e) => { println!("{:?}", e); continue },
+                        Err(e) => {
+                            println!("{:?}", e);
+                            continue;
+                        }
                     };
                     if !remote.ip().is_loopback() {
                         println!("CONTROL: {} rejected", remote);
@@ -206,7 +240,13 @@ pub fn server_thread(init: Init, config: &Config) {
                         poll.registry().deregister(&mut old.stream).unwrap();
                     }
                     println!("CONTROL: {} connected", remote);
-                    poll.registry().register(&mut stream, CONTROL_CHANNEL, Interest::READABLE | Interest::WRITABLE).unwrap();
+                    poll.registry()
+                        .register(
+                            &mut stream,
+                            CONTROL_CHANNEL,
+                            Interest::READABLE | Interest::WRITABLE,
+                        )
+                        .unwrap();
                     control.connect();
                     control_client = Some(ControlConnection::new(stream));
                 }
@@ -217,12 +257,12 @@ pub fn server_thread(init: Init, config: &Config) {
                     }
                     if event.is_readable() {
                         match control_client.read(&mut control.read_queue) {
-                            Ok(()) => {},
-                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
+                            Ok(()) => {}
+                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
                             Err(e) => {
                                 println!("CONTROL: disconnected: {}", e);
                                 control_client.dead = true;
-                                break
+                                break;
                             }
                         }
                     }
@@ -233,7 +273,10 @@ pub fn server_thread(init: Init, config: &Config) {
                         Ok(r) => r,
                         Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                        Err(e) => { println!("{:?}", e); continue },
+                        Err(e) => {
+                            println!("{:?}", e);
+                            continue;
+                        }
                     };
                     let buf = &udp_buf[..len];
 
@@ -263,14 +306,27 @@ pub fn server_thread(init: Init, config: &Config) {
                                 // allowed bandwidth
                                 let _ = output.write_u32::<BigEndian>(64_000);
                             });
-                            udp_queue(&udp, &mut udp_writeable, &mut udp_out_queue, &remote, response);
+                            udp_queue(
+                                &udp,
+                                &mut udp_writeable,
+                                &mut udp_out_queue,
+                                &remote,
+                                response,
+                            );
                         } else {
                             // Encrypted UDP packet.
                             if let Some(connection_key) = udp_clients.get(&remote).copied() {
                                 if let Some(connection) = clients.get_mut(&connection_key) {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
-                                        if let Some(decrypted) = crypt.decrypt(buf, &mut udp_crypt_buf) {
-                                            read_voice(decrypted, &mut connection.client, &mut connection.decoder, true)?;
+                                        if let Some(decrypted) =
+                                            crypt.decrypt(buf, &mut udp_crypt_buf)
+                                        {
+                                            read_voice(
+                                                decrypted,
+                                                &mut connection.client,
+                                                &mut connection.decoder,
+                                                true,
+                                            )?;
                                         }
                                     }
                                 }
@@ -278,10 +334,17 @@ pub fn server_thread(init: Init, config: &Config) {
                                 // Seems insane but this is what Murmur does.
                                 for (k, connection) in clients.iter_mut() {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
-                                        if let Some(decrypted) = crypt.decrypt(buf, &mut udp_crypt_buf) {
+                                        if let Some(decrypted) =
+                                            crypt.decrypt(buf, &mut udp_crypt_buf)
+                                        {
                                             connection.udp_remote = Some(remote);
                                             udp_clients.insert(remote, *k);
-                                            read_voice(decrypted, &mut connection.client, &mut connection.decoder, true)?;
+                                            read_voice(
+                                                decrypted,
+                                                &mut connection.client,
+                                                &mut connection.decoder,
+                                                true,
+                                            )?;
                                             break;
                                         }
                                     }
@@ -306,9 +369,13 @@ pub fn server_thread(init: Init, config: &Config) {
                     if let Some(stream) = connection.stream.resolve() {
                         if !connection.hash_delivered {
                             connection.hash_delivered = true;
-                            let hash = stream.ssl().peer_certificate()
+                            let hash = stream
+                                .ssl()
+                                .peer_certificate()
                                 // Murmur uses SHA-1 so we shall too
-                                .and_then(|cert| cert.digest(openssl::hash::MessageDigest::sha1()).ok())
+                                .and_then(|cert| {
+                                    cert.digest(openssl::hash::MessageDigest::sha1()).ok()
+                                })
                                 .map(|digest| {
                                     let mut buf = String::new();
                                     for byte in digest.iter() {
@@ -319,9 +386,13 @@ pub fn server_thread(init: Init, config: &Config) {
                                 });
                             connection.client.events.push_back(Command::CertHash(hash));
                         }
-                        match read_packets(&mut connection.read_buf.with(stream), &mut connection.client, &mut connection.decoder) {
-                            Ok(()) => {},
-                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {},
+                        match read_packets(
+                            &mut connection.read_buf.with(stream),
+                            &mut connection.client,
+                            &mut connection.decoder,
+                        ) {
+                            Ok(()) => {}
+                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
                             Err(e) => io_error(&mut connection.client, e),
                         }
                     }
@@ -334,9 +405,15 @@ pub fn server_thread(init: Init, config: &Config) {
         if let Some(ref mut control_client) = control_client {
             while control_client.write_buf.is_writable() {
                 if !control_client.write_buf.is_empty() {
-                    match control_client.write_buf.with(&mut control_client.stream).flush_buf() {
+                    match control_client
+                        .write_buf
+                        .with(&mut control_client.stream)
+                        .flush_buf()
+                    {
                         Ok(()) => {}
-                        Err(e) => { println!("CONTROL: flush error: {:?}", e); }
+                        Err(e) => {
+                            println!("CONTROL: flush error: {:?}", e);
+                        }
                     }
                     break;
                 } else if let Some(event) = control.write_queue.pop_front() {
@@ -345,7 +422,10 @@ pub fn server_thread(init: Init, config: &Config) {
                     }
                     let vec = match ::serde_json::to_vec(&event) {
                         Ok(vec) => vec,
-                        Err(e) => { println!("CONTROL: serialize error: {:?}", e); break; }
+                        Err(e) => {
+                            println!("CONTROL: serialize error: {:?}", e);
+                            break;
+                        }
                     };
                     assert!(vec.len() <= 0xffffffff);
                     let mut out = control_client.write_buf.with(&mut control_client.stream);
@@ -354,10 +434,13 @@ pub fn server_thread(init: Init, config: &Config) {
                         out.write_all(&vec)
                     })() {
                         Ok(()) => {}
-                        Err(e) => { println!("CONTROL: write error: {:?}", e); break; }
+                        Err(e) => {
+                            println!("CONTROL: write error: {:?}", e);
+                            break;
+                        }
                     }
                 } else {
-                    break
+                    break;
                 }
             }
             dead = control_client.dead;
@@ -377,16 +460,18 @@ pub fn server_thread(init: Init, config: &Config) {
 
             for i in 0..clients_vec.len() {
                 let (before, after) = clients_vec.split_at_mut(i);
-                let (connection, after) = after.split_first_mut().unwrap();  // should be infallible
+                let (connection, after) = after.split_first_mut().unwrap(); // should be infallible
 
                 // Read events happened above, so tick immediately
-                connection.client.tick(&mut control, Everyone(before, after));
+                connection
+                    .client
+                    .tick(&mut control, Everyone(before, after));
             }
 
             // Now that clients have ticked, flush pending writes and finalize disconnectors
             for i in 0..clients_vec.len() {
                 let (before, after) = clients_vec.split_at_mut(i);
-                let (connection, after) = after.split_first_mut().unwrap();  // should be infallible
+                let (connection, after) = after.split_first_mut().unwrap(); // should be infallible
 
                 while connection.write_buf.is_writable() {
                     connection.stream.resolve();
@@ -394,8 +479,8 @@ pub fn server_thread(init: Init, config: &Config) {
                         Stream::Active(ref mut stream) => stream,
                         Stream::Invalid => {
                             connection.client.kick("SSL setup failure");
-                            break
-                        },
+                            break;
+                        }
                         _ => break,
                     };
 
@@ -418,31 +503,51 @@ pub fn server_thread(init: Init, config: &Config) {
                                     break;
                                 }
 
-                                match connection.write_buf.with(stream).write_all(&encode_buf[..len]) {
+                                match connection
+                                    .write_buf
+                                    .with(stream)
+                                    .write_all(&encode_buf[..len])
+                                {
                                     Ok(()) => {}
-                                    Err(e) => { io_error(&mut connection.client, e); break }
+                                    Err(e) => {
+                                        io_error(&mut connection.client, e);
+                                        break;
+                                    }
                                 }
-                            },
-                            OutCommand::VoiceData { who, seq, audio, end } => {
+                            }
+                            OutCommand::VoiceData {
+                                who,
+                                seq,
+                                audio,
+                                end,
+                            } => {
                                 // Encode the audio
                                 let audio = {
-                                    let len = connection.encoders.entry(who)
+                                    let len = connection
+                                        .encoders
+                                        .entry(who)
                                         .or_insert_with(|| {
-                                            let mut encoder = Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION).unwrap();
+                                            let mut encoder =
+                                                Encoder::new(SAMPLE_RATE, CHANNELS, APPLICATION)
+                                                    .unwrap();
                                             encoder.set_bitrate(BITRATE).unwrap();
                                             encoder.set_vbr(false).unwrap();
                                             encoder
                                         })
-                                        .encode(&audio, &mut udp_crypt_buf).unwrap();
+                                        .encode(&audio, &mut udp_crypt_buf)
+                                        .unwrap();
                                     &udp_crypt_buf[..len]
                                 };
 
                                 // Prepare the unencrypted datagram
                                 let datagram = encode(&mut udp_buf, |encoded| {
-                                    let _ = encoded.write_u8(128);  // header byte, opus on normal channel
-                                    let _ = write_varint(encoded, who as i64);  // session of source user
-                                    let _ = write_varint(encoded, seq);  // sequence number
-                                    let _ = write_varint(encoded, (audio.len() | if end { 0x2000 } else { 0 }) as i64);  // opus header
+                                    let _ = encoded.write_u8(128); // header byte, opus on normal channel
+                                    let _ = write_varint(encoded, who as i64); // session of source user
+                                    let _ = write_varint(encoded, seq); // sequence number
+                                    let _ = write_varint(
+                                        encoded,
+                                        (audio.len() | if end { 0x2000 } else { 0 }) as i64,
+                                    ); // opus header
                                     encoded.write_all(audio).unwrap();
                                 });
 
@@ -457,8 +562,15 @@ pub fn server_thread(init: Init, config: &Config) {
                                     if udp_valid {
                                         if let Some(remote) = udp_remote {
                                             if let Some(crypt) = crypt {
-                                                let encrypted = crypt.encrypt(datagram, &mut udp_crypt_buf);
-                                                udp_queue(&udp, &mut udp_writeable, &mut udp_out_queue, remote, encrypted);
+                                                let encrypted =
+                                                    crypt.encrypt(datagram, &mut udp_crypt_buf);
+                                                udp_queue(
+                                                    &udp,
+                                                    &mut udp_writeable,
+                                                    &mut udp_out_queue,
+                                                    remote,
+                                                    encrypted,
+                                                );
                                             }
                                         }
                                     }
@@ -466,8 +578,10 @@ pub fn server_thread(init: Init, config: &Config) {
                                     // Construct the UDPTunnel header
                                     let mut tunnel_buf = [0; 6];
                                     let tunnel_header = encode(&mut tunnel_buf, |header| {
-                                        let _ = header.write_u16::<BigEndian>(1);  // UDP tunnel
-                                        let _ = header.write_u32::<BigEndian>(datagram.len() as u32);  // Length
+                                        let _ = header.write_u16::<BigEndian>(1); // UDP tunnel
+                                        let _ =
+                                            header.write_u32::<BigEndian>(datagram.len() as u32);
+                                        // Length
                                     });
 
                                     out.write_all(tunnel_header)?;
@@ -477,11 +591,11 @@ pub fn server_thread(init: Init, config: &Config) {
                                     io_error(&mut connection.client, e);
                                     break;
                                 }
-                            },
+                            }
                             OutCommand::VoicePing(timestamp) => {
                                 // Construct the ping datagram
                                 let datagram = encode(&mut udp_buf, |out| {
-                                    let _ = out.write_u8(32);  // header byte, ping
+                                    let _ = out.write_u8(32); // header byte, ping
                                     let _ = write_varint(out, timestamp);
                                 });
 
@@ -489,23 +603,31 @@ pub fn server_thread(init: Init, config: &Config) {
                                 if let Some(remote) = connection.udp_remote.as_ref() {
                                     if let Some(crypt) = connection.client.crypt_state.as_mut() {
                                         let encrypted = crypt.encrypt(datagram, &mut udp_crypt_buf);
-                                        udp_queue(&udp, &mut udp_writeable, &mut udp_out_queue, remote, encrypted);
+                                        udp_queue(
+                                            &udp,
+                                            &mut udp_writeable,
+                                            &mut udp_out_queue,
+                                            remote,
+                                            encrypted,
+                                        );
                                     }
                                 }
 
                                 // No sense tunneling these
-                            },
+                            }
                         }
                     } else {
-                        break
+                        break;
                     }
                 }
 
                 // disconnect those who should be disconnected
                 if let Some(message) = connection.client.disconnected.take() {
                     println!("{} quit: {}", connection.client, message);
-                    connection.client.disconnected = Some(message);  // for quit() and the drop at the end
-                    connection.client.quit(&mut control, Everyone(before, after));
+                    connection.client.disconnected = Some(message); // for quit() and the drop at the end
+                    connection
+                        .client
+                        .quit(&mut control, Everyone(before, after));
                     if let Some(tcp) = connection.stream.inner() {
                         poll.registry().deregister(tcp).unwrap();
                     }
@@ -524,13 +646,19 @@ pub fn server_thread(init: Init, config: &Config) {
                     break;
                 }
             } else {
-                break
+                break;
             }
         }
     }
 }
 
-fn udp_queue(udp: &UdpSocket, writeable: &mut bool, udp_out_queue: &mut VecDeque<(SocketAddr, Vec<u8>)>, remote: &SocketAddr, packet: &[u8]) {
+fn udp_queue(
+    udp: &UdpSocket,
+    writeable: &mut bool,
+    udp_out_queue: &mut VecDeque<(SocketAddr, Vec<u8>)>,
+    remote: &SocketAddr,
+    packet: &[u8],
+) {
     if *writeable && udp_write(udp, writeable, remote, packet) {
         return;
     }
@@ -544,7 +672,10 @@ fn udp_write(udp: &UdpSocket, writeable: &mut bool, remote: &SocketAddr, packet:
             *writeable = false;
             false
         }
-        Err(e) => { println!("UDP out error: {:?}", e); true }
+        Err(e) => {
+            println!("UDP out error: {:?}", e);
+            true
+        }
     }
 }
 
@@ -592,7 +723,14 @@ impl PacketChannel {
 
     #[inline]
     pub fn send_voice(&self, who: u32, seq: i64, audio: Rc<[Sample]>) -> bool {
-        self.0.send(OutCommand::VoiceData { who, seq, audio, end: false }).is_ok()
+        self.0
+            .send(OutCommand::VoiceData {
+                who,
+                seq,
+                audio,
+                end: false,
+            })
+            .is_ok()
     }
 
     fn send_voice_ping(&self, timestamp: i64) -> bool {
@@ -681,7 +819,10 @@ fn io_error(c: &mut Client, e: io::Error) {
     }
 }
 
-pub struct Everyone<'a, 'b: 'a, 'cfg: 'b>(&'a mut [&'b mut Connection<'cfg>], &'a mut [&'b mut Connection<'cfg>]);
+pub struct Everyone<'a, 'b: 'a, 'cfg: 'b>(
+    &'a mut [&'b mut Connection<'cfg>],
+    &'a mut [&'b mut Connection<'cfg>],
+);
 
 impl<'a, 'b, 'cfg> Everyone<'a, 'b, 'cfg> {
     pub fn for_each<F: FnMut(&mut Client)>(&mut self, mut f: F) {
@@ -711,7 +852,11 @@ fn encode<F: FnOnce(&mut &mut [u8])>(buffer: &mut [u8], f: F) -> &mut [u8] {
 // ----------------------------------------------------------------------------
 // Protocol implementation
 
-fn read_packets<R: BufRead + ?Sized>(read: &mut R, client: &mut Client, decoder: &mut Decoder) -> io::Result<()> {
+fn read_packets<R: BufRead + ?Sized>(
+    read: &mut R,
+    client: &mut Client,
+    decoder: &mut Decoder,
+) -> io::Result<()> {
     use mumble_protocol::*;
 
     loop {
@@ -726,9 +871,10 @@ fn read_packets<R: BufRead + ?Sized>(read: &mut R, client: &mut Client, decoder:
                 let ty = (&buffer[..2]).read_u16::<BigEndian>().unwrap();
                 let len = 6 + (&buffer[2..6]).read_u32::<BigEndian>().unwrap() as usize;
                 if buffer.len() < len {
-                    break;  // incomplete
+                    break; // incomplete
                 }
-                if ty == 1 {  // UdpTunnel
+                if ty == 1 {
+                    // UdpTunnel
                     read_voice(&buffer[6..len], client, decoder, false)?;
                 } else {
                     let packet = Packet::parse(ty, &buffer[6..len])?;
@@ -753,7 +899,12 @@ fn read_packets<R: BufRead + ?Sized>(read: &mut R, client: &mut Client, decoder:
     }
 }
 
-fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder, set_udp_valid: bool) -> io::Result<()> {
+fn read_voice(
+    mut buffer: &[u8],
+    client: &mut Client,
+    decoder: &mut Decoder,
+    set_udp_valid: bool,
+) -> io::Result<()> {
     //const CELT_ALPHA: u8 = 0;
     const PING: u8 = 1;
     //const SPEEX: u8 = 2;
@@ -767,10 +918,10 @@ fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder, set
     if ty == PING {
         let timestamp = read_varint(&mut buffer)?;
         client.sender.send_voice_ping(timestamp);
-        return Ok(())
+        return Ok(());
     } else if ty != OPUS {
         println!("Unknown type: {}", ty);
-        return Ok(())
+        return Ok(());
     }
     if target != TARGET_NORMAL {
         println!("Unknown target: {}", target);
@@ -797,11 +948,11 @@ fn read_voice(mut buffer: &[u8], client: &mut Client, decoder: &mut Decoder, set
     };
 
     /*println!("IN: voice: seq={} rem={} enc={} dec={}",
-        sequence_number,
-        buffer.len() - opus_length as usize,
-        opus_length,
-        len,
-        );*/
+    sequence_number,
+    buffer.len() - opus_length as usize,
+    opus_length,
+    len,
+    );*/
 
     client.events.push_back(Command::VoiceData {
         seq: sequence_number,
@@ -819,67 +970,86 @@ fn read_varint<R: Read>(r: &mut R) -> io::Result<i64> {
 
 fn read_varint_inner<R: Read>(r: &mut R, recursive: bool) -> io::Result<i64> {
     let first_byte = r.read_u8()? as i64;
-    if first_byte & 128 == 0 {  // 7-bit positive number
+    if first_byte & 128 == 0 {
+        // 7-bit positive number
         Ok(first_byte & 127)
-    } else if first_byte & 64 == 0 {  // 14-bit positive number
+    } else if first_byte & 64 == 0 {
+        // 14-bit positive number
         let second_byte = r.read_u8()? as i64;
         Ok(((first_byte & 63) << 8) | second_byte)
-    } else if first_byte & 32 == 0 {  // 21-bit positive number
+    } else if first_byte & 32 == 0 {
+        // 21-bit positive number
         let second_byte = r.read_u8()? as i64;
         let third_byte = r.read_u8()? as i64;
         Ok(((first_byte & 31) << 16) | (second_byte << 8) | third_byte)
-    } else if first_byte & 16 == 0 {  // 28-bit positive number
+    } else if first_byte & 16 == 0 {
+        // 28-bit positive number
         let second_byte = r.read_u8()? as i64;
         let third_byte = r.read_u8()? as i64;
         let fourth_byte = r.read_u8()? as i64;
         Ok(((first_byte & 15) << 24) | (second_byte << 16) | (third_byte << 8) | fourth_byte)
-    } else if first_byte & 12 == 0 {  // 32-bit positive number
+    } else if first_byte & 12 == 0 {
+        // 32-bit positive number
         Ok(r.read_u32::<BigEndian>()? as i64)
-    } else if first_byte & 12 == 4 {  // 64-bit number
+    } else if first_byte & 12 == 4 {
+        // 64-bit number
         r.read_i64::<BigEndian>()
-    } else if first_byte & 12 == 8 {  // negative recursive varint
-        if recursive {  // can't negate a negation
+    } else if first_byte & 12 == 8 {
+        // negative recursive varint
+        if recursive {
+            // can't negate a negation
             Err(io::ErrorKind::InvalidData.into())
         } else {
             read_varint_inner(r, true).map(|i| -i)
         }
-    } else /* first_byte & 12 == 4 */ {  // byte-inverted negative two-bit number
+    } else
+    /* first_byte & 12 == 4 */
+    {
+        // byte-inverted negative two-bit number
         Ok(!(first_byte & 3))
     }
 }
 
 fn write_varint<W: Write>(w: &mut W, mut val: i64) -> io::Result<()> {
-    if val < 0 {  // negative
-        if val >= -4 {  // small value
+    if val < 0 {
+        // negative
+        if val >= -4 {
+            // small value
             return w.write_u8(0b11111100 | (!val as u8));
-        } else if val < -0xffffffff {  // large negative value
-            w.write_u8(0b11110100)?;  // 64-bit number
+        } else if val < -0xffffffff {
+            // large negative value
+            w.write_u8(0b11110100)?; // 64-bit number
             return w.write_i64::<BigEndian>(val);
         } else {
-            w.write_u8(0b11111000)?;  // negative recursive varint
+            w.write_u8(0b11111000)?; // negative recursive varint
             val = -val;
         }
     }
     // positive
-    if val < (1 << 7) {  // 7-bit positive number
+    if val < (1 << 7) {
+        // 7-bit positive number
         w.write_u8(val as u8)
-    } else if val < (1 << 14) {  // 14-bit positive number
+    } else if val < (1 << 14) {
+        // 14-bit positive number
         w.write_u8(0b10000000 | (val >> 8) as u8)?;
         w.write_u8(val as u8)
-    } else if val < (1 << 21) {  // 21-bit positive number
+    } else if val < (1 << 21) {
+        // 21-bit positive number
         w.write_u8(0b11000000 | (val >> 16) as u8)?;
         w.write_u8((val >> 8) as u8)?;
         w.write_u8(val as u8)
-    } else if val < (1 << 28) {  // 28-bit positive number
+    } else if val < (1 << 28) {
+        // 28-bit positive number
         w.write_u8(0b11100000 | (val >> 24) as u8)?;
         w.write_u8((val >> 16) as u8)?;
         w.write_u8((val >> 8) as u8)?;
         w.write_u8(val as u8)
-    } else if val < (1 << 32) {  // 32-bit positive number
+    } else if val < (1 << 32) {
+        // 32-bit positive number
         w.write_u8(0b11110000)?;
         w.write_u32::<BigEndian>(val as u32)
     } else {
-        w.write_u8(0b11110100)?;  // 64-bit number
+        w.write_u8(0b11110100)?; // 64-bit number
         w.write_i64::<BigEndian>(val)
     }
 }
@@ -926,13 +1096,13 @@ impl ControlConnection {
                 while buffer.len() >= 4 {
                     let len = 4 + (&buffer[..]).read_u32::<BigEndian>().unwrap() as usize;
                     if buffer.len() < len {
-                        break;  // incomplete
+                        break; // incomplete
                     }
                     match ::serde_json::from_slice::<ControlIn>(&buffer[4..len]) {
                         Ok(msg) => {
                             read_queue.push_back(msg);
                         }
-                        Err(e) => println!("CONTROL in error: {:?}", e)
+                        Err(e) => println!("CONTROL in error: {:?}", e),
                     }
                     consumed += len;
                     buffer = &buffer[len..];

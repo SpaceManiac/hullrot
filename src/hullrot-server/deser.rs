@@ -17,11 +17,11 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 //! having no integers.
 // https://github.com/Facepunch/garrysmod-issues/issues/3403
 
-use std::fmt;
-use std::collections::HashMap;
-use std::marker::PhantomData;
-use std::hash::Hash;
 use std::cmp::Eq;
+use std::collections::HashMap;
+use std::fmt;
+use std::hash::Hash;
+use std::marker::PhantomData;
 
 use serde::*;
 
@@ -124,13 +124,15 @@ impl<'de> Deserialize<'de> for ::Freq {
 }
 
 /// Deserialize the empty sequence `[]` as the empty map `{}`.
-pub fn as_map<'de, D, K, V>(de: D) -> Result<HashMap<K, V>, D::Error> where
+pub fn as_map<'de, D, K, V>(de: D) -> Result<HashMap<K, V>, D::Error>
+where
     D: Deserializer<'de>,
     K: Deserialize<'de> + Hash + Eq,
     V: Deserialize<'de>,
 {
     struct MapVisitor<K, V>(PhantomData<(K, V)>);
-    impl<'de, K, V> de::Visitor<'de> for MapVisitor<K, V> where
+    impl<'de, K, V> de::Visitor<'de> for MapVisitor<K, V>
+    where
         K: Deserialize<'de> + Hash + Eq,
         V: Deserialize<'de>,
     {

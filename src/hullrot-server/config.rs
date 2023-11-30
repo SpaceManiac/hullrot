@@ -15,11 +15,11 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Configuration handling.
 
-use std::collections::BTreeMap;
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer};
 use toml;
@@ -78,13 +78,15 @@ impl Config {
         println!("Loading {}", path.display());
         let mut buf = Vec::new();
         match File::open(path) {
-            Ok(mut file) => { file.read_to_end(&mut buf)?; },
+            Ok(mut file) => {
+                file.read_to_end(&mut buf)?;
+            }
             Err(ref err) if default && err.kind() == io::ErrorKind::NotFound => {
                 println!("Not found, using defaults");
                 let cfg = Config::default();
                 let _ = cfg.save(path);
                 return Ok(cfg);
-            },
+            }
             Err(err) => return Err(err.into()),
         }
         let root: DeRoot = toml::de::from_slice(&buf)?;
@@ -121,10 +123,12 @@ impl AuthDB {
     fn load_inner(path: &Path) -> Result<BTreeMap<String, String>, Box<dyn std::error::Error>> {
         let mut buf = Vec::new();
         match File::open(path) {
-            Ok(mut file) => { file.read_to_end(&mut buf)?; },
+            Ok(mut file) => {
+                file.read_to_end(&mut buf)?;
+            }
             Err(ref err) if err.kind() == io::ErrorKind::NotFound => {
                 return Ok(Default::default());
-            },
+            }
             Err(err) => return Err(err.into()),
         }
         toml::de::from_slice(&buf).map_err(From::from)
@@ -135,7 +139,7 @@ impl AuthDB {
         println!("Loading {}", path.display());
         AuthDB::load_inner(path).map(|assoc| AuthDB {
             path: path.to_owned(),
-            assoc: RefCell::new(assoc)
+            assoc: RefCell::new(assoc),
         })
     }
 
@@ -151,7 +155,9 @@ impl AuthDB {
 
     /// Set an association. Changes are persisted.
     pub fn set(&self, cert: &str, ckey: &str) {
-        self.assoc.borrow_mut().insert(cert.to_owned(), ckey.to_owned());
+        self.assoc
+            .borrow_mut()
+            .insert(cert.to_owned(), ckey.to_owned());
         if let Err(e) = self.save(&self.path) {
             println!("Error saving {}: {}", self.path.display(), e);
         }

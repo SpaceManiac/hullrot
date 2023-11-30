@@ -36,6 +36,12 @@ fn main() {
     // workaround for https://github.com/rust-lang/rust/issues/18810
     std::fs::File::create(format!("{}/generated.rs", out_dir))
         .unwrap()
-        .write_all(format!("#[path = {:?}] mod generated;", format!("{}/Mumble.rs", out_dir)).as_bytes())
+        .write_all(
+            format!(
+                "#[path = {:?}] mod generated;",
+                format!("{}/Mumble.rs", out_dir)
+            )
+            .as_bytes(),
+        )
         .unwrap();
 }
