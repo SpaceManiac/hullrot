@@ -27,9 +27,15 @@ pub struct BufReader {
     cap: usize,
 }
 
+impl Default for BufReader {
+    fn default() -> Self {
+        BufReader::with_capacity(DEFAULT_BUF_SIZE)
+    }
+}
+
 impl BufReader {
     pub fn new() -> BufReader {
-        BufReader::with_capacity(DEFAULT_BUF_SIZE)
+        Default::default()
     }
 
     pub fn with_capacity(cap: usize) -> BufReader {
@@ -94,9 +100,15 @@ pub struct BufWriter {
     writable: bool,
 }
 
+impl Default for BufWriter {
+    fn default() -> Self {
+        BufWriter::with_capacity(DEFAULT_BUF_SIZE)
+    }
+}
+
 impl BufWriter {
     pub fn new() -> BufWriter {
-        BufWriter::with_capacity(DEFAULT_BUF_SIZE)
+        Default::default()
     }
 
     pub fn with_capacity(cap: usize) -> BufWriter {

@@ -63,22 +63,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut config_path = std::path::Path::new("hullrot.toml");
     let mut config_default = true;
 
-    for arg in std::env::args().skip(1) {
+    //for arg in std::env::args().skip(1) {
+    if let Some(arg) = std::env::args().nth(1) {
         if arg == "-h" || arg == "--help" || arg == "-V" || arg == "--version" {
-            return {
-                usage();
-                Ok(())
-            };
+            usage();
+            return Ok(());
         } else if arg == "--license-mumble" {
-            return {
-                mumble_license();
-                Ok(())
-            };
+            mumble_license();
+            return Ok(());
         }
         config_path_owned = std::path::PathBuf::from(arg);
         config_path = &config_path_owned;
         config_default = false;
-        break;
+        //break;
     }
 
     println!("Running in {}", std::env::current_dir().unwrap().display());

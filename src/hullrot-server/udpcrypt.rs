@@ -133,13 +133,11 @@ impl CryptState {
 
         if self.decrypt_iv[0].wrapping_add(1) == ivbyte {
             // In order as expected.
-            if ivbyte > self.decrypt_iv[0] {
-                self.decrypt_iv[0] = ivbyte;
-            } else if ivbyte < self.decrypt_iv[0] {
-                self.decrypt_iv[0] = ivbyte;
+            self.decrypt_iv[0] = ivbyte;
+            if ivbyte == 0 {
+                // Equivalent to if ivbyte < self.decrypt_iv[0]
+                // Wrapped around.
                 increment_iv(&mut self.decrypt_iv[1..]);
-            } else {
-                return None;
             }
         } else {
             // This is either out of order or a repeat.
@@ -181,7 +179,7 @@ impl CryptState {
         let sliced_dst = &mut dst[..source.len() - 4];
         ocb_decrypt(&mut self.encrypt_key, &self.raw_key, &source[4..], sliced_dst, &self.decrypt_iv, &mut tag);
 
-        if &tag[..3] != &source[1..4] {
+        if tag[..3] != source[1..4] {
             self.decrypt_iv.copy_from_slice(&saveiv);
             return None;
         }
