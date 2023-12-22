@@ -316,12 +316,13 @@ fn zero<T: Default>(block: &mut [T]) {
 
 fn aes_encrypt(src: &Keyblock, dst: &mut Keyblock, key: &mut Crypter) {
     let mut dst2 = [0; 2 * AES_BLOCK_SIZE];
-    key.update(src, &mut dst2).unwrap();
+    assert_eq!(16, key.update(src, &mut dst2).unwrap());
     dst.copy_from_slice(&dst2[..AES_BLOCK_SIZE]);
 }
 
 fn aes_decrypt(src: &Keyblock, dst: &mut Keyblock, key: &Keyblock) {
     let mut decrypt_key = Crypter::new(Cipher::aes_128_ecb(), Mode::Decrypt, key, None).unwrap();
+    decrypt_key.pad(false);
     aes_encrypt(src, dst, &mut decrypt_key)
 }
 
@@ -477,7 +478,7 @@ fn authcrypt() {
             &mut dectag,
         );
 
-        assert_eq!(enctag, dectag);
-        assert_eq!(src, decrypted);
+        assert_eq!(enctag, dectag, "enctag and dectag differ for len={}", len);
+        assert_eq!(src, decrypted, "src and decrypted differ for len={}", len);
     }
 }
