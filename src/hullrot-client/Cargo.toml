@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 libc = "0.2.0"
-mio = { version = "0.8.2", features = ["net", "os-poll"] }
+mio = { version = "0.8.11", features = ["net", "os-poll"] }
 byteorder = "1.1.0"
 serde = "1.0.21"
 serde_derive = "1.0.21"
