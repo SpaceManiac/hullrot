@@ -476,7 +476,7 @@ impl<'cfg> Client<'cfg> {
         remote: std::net::SocketAddr,
         sender: net::PacketChannel,
         session: u32,
-    ) -> Client {
+    ) -> Client<'cfg> {
         sender.send(packet! { Version;
             set_version: 0x10300,
             set_release: concat!("Hullrot v", env!("CARGO_PKG_VERSION")).to_owned(),

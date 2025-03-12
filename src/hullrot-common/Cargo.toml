@@ -2,6 +2,7 @@
 name = "hullrot-common"
 version = "0.0.0"
 authors = ["Tad Hardesty <tad@platymuus.com>"]
+edition = "2015"
 
 [lib]
 path = "lib.rs"
