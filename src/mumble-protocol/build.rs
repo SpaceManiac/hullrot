@@ -13,14 +13,15 @@ You should have received a copy of the GNU Affero General Public License
 along with Hullrot.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-extern crate protoc_rust;
+extern crate protobuf_codegen;
 
 use std::io::Write;
 
 fn main() {
     // run protoc
     let out_dir = std::env::var("OUT_DIR").expect("missing OUT_DIR");
-    if let Err(e) = protoc_rust::Codegen::new()
+    if let Err(e) = protobuf_codegen::Codegen::new()
+        .include(".")
         .input("Mumble.proto")
         .out_dir(&out_dir)
         .run()

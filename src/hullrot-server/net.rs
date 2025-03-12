@@ -881,7 +881,7 @@ fn read_packets<R: BufRead + ?Sized>(
                     // handle pings immediately, save Client the trouble
                     if let Packet::Ping(ref ping) = packet {
                         let mut pong = packet! { Ping;
-                            set_timestamp: ping.get_timestamp(),
+                            set_timestamp: ping.timestamp(),
                         };
                         if let Some(crypt) = client.crypt_state.as_ref() {
                             crypt.set_stats(&mut pong);

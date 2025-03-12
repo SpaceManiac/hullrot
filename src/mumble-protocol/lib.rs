@@ -18,6 +18,8 @@ pub extern crate protobuf;
 #[macro_use]
 extern crate bitflags;
 
+use std::convert::TryFrom;
+
 use byteorder::{BigEndian, WriteBytesExt};
 use protobuf::Message;
 
@@ -34,10 +36,10 @@ macro_rules! packets {
         }
 
         impl Packet {
-            pub fn parse(ty: u16, buf: &[u8]) -> protobuf::ProtobufResult<Packet> {
+            pub fn parse(ty: u16, buf: &[u8]) -> std::io::Result<Packet> {
                 match ty {
-                    $($num => $name::parse_from_bytes(buf).map(Packet::$name),)*
-                    _ => Err(protobuf::ProtobufError::message_not_initialized("unknown opcode"))
+                    $($num => Ok(Packet::$name($name::parse_from_bytes(buf)?)),)*
+                    _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "unknown opcode")),
                 }
             }
 
@@ -47,12 +49,13 @@ macro_rules! packets {
                 } as usize
             }
 
-            pub fn encode(&self, mut buf: &mut [u8]) -> protobuf::ProtobufResult<usize> {
+            pub fn encode(&self, mut buf: &mut [u8]) -> std::io::Result<usize> {
                 let start_len = buf.len();
                 match *self {
                     $(Packet::$name(ref inner) => {
                         buf.write_u16::<BigEndian>($num)?;
-                        buf.write_u32::<BigEndian>(inner.compute_size())?;
+                        let size = u32::try_from(inner.compute_size()).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                        buf.write_u32::<BigEndian>(size)?;
                         inner.write_to_writer(&mut buf)?;
                     })*
                 }

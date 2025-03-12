@@ -585,11 +585,11 @@ impl<'cfg> Client<'cfg> {
                 }
                 Command::Packet(Packet::Authenticate(auth)) => {
                     // Accept the username
-                    let name = auth.get_username();
+                    let name = auth.username();
                     if !auth.has_username() || name.is_empty() {
                         return self.kick("No username");
                     }
-                    if !auth.get_opus() {
+                    if !auth.opus() {
                         return self.kick("No Opus support");
                     }
 
@@ -640,14 +640,14 @@ impl<'cfg> Client<'cfg> {
                 }
                 Command::Packet(Packet::UserState(ref state)) => {
                     if state.has_self_deaf() {
-                        self.self_deaf = state.get_self_deaf();
+                        self.self_deaf = state.self_deaf();
                     }
                 }
                 Command::Packet(Packet::UserRemove(ref remove)) if self.admin => {
-                    let session = remove.get_session();
+                    let session = remove.session();
                     others.for_each(|other| {
                         if other.session == session {
-                            other.kick(format!("Kicked by {}: {}", self, remove.get_reason()));
+                            other.kick(format!("Kicked by {}: {}", self, remove.reason()));
                         }
                     });
                 }
