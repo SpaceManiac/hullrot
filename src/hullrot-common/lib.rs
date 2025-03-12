@@ -59,7 +59,7 @@ pub struct BufReaderWith<'b, 'r, R: ?Sized + 'r> {
     inner: &'r mut R,
 }
 
-impl<'b, 'r, R: Read + ?Sized + 'r> Read for BufReaderWith<'b, 'r, R> {
+impl<'r, R: Read + ?Sized + 'r> Read for BufReaderWith<'_, 'r, R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         // If we don't have any buffered data and we're doing a massive read
         // (larger than our internal buffer), bypass our internal buffer
@@ -76,7 +76,7 @@ impl<'b, 'r, R: Read + ?Sized + 'r> Read for BufReaderWith<'b, 'r, R> {
     }
 }
 
-impl<'b, 'r, R: Read + ?Sized + 'r> BufRead for BufReaderWith<'b, 'r, R> {
+impl<'r, R: Read + ?Sized + 'r> BufRead for BufReaderWith<'_, 'r, R> {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         // If we've reached the end of our internal buffer then we need to fetch
         // some more data from the underlying reader.
@@ -153,7 +153,7 @@ pub struct BufWriterWith<'b, 'w, W: Write + ?Sized + 'w> {
     inner: &'w mut W,
 }
 
-impl<'b, 'w, W: Write + ?Sized + 'w> BufWriterWith<'b, 'w, W> {
+impl<'w, W: Write + ?Sized + 'w> BufWriterWith<'_, 'w, W> {
     pub fn flush_buf(&mut self) -> io::Result<()> {
         let mut written = 0;
         let len = self.buf.buf.len();
@@ -189,7 +189,7 @@ impl<'b, 'w, W: Write + ?Sized + 'w> BufWriterWith<'b, 'w, W> {
     }
 }
 
-impl<'b, 'w, W: Write + ?Sized + 'w> Write for BufWriterWith<'b, 'w, W> {
+impl<'w, W: Write + ?Sized + 'w> Write for BufWriterWith<'_, 'w, W> {
     // If this succeeds, it will always succeed with the correct length. The
     // input will always be written either out or to the buffer. If a given
     // write would have returned `WouldBlock`, the `writable` flag is unset and

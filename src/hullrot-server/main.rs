@@ -825,7 +825,7 @@ impl<'cfg> Client<'cfg> {
     }
 }
 
-impl<'cfg> std::fmt::Display for Client<'cfg> {
+impl std::fmt::Display for Client<'_> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         if let AuthState::Active { ref username, .. } = self.auth_state {
             write!(fmt, "{} ({}/{})", username, self.session, self.remote)
@@ -858,7 +858,7 @@ enum AuthState {
     Errored,
 }
 
-impl<'cfg> Client<'cfg> {
+impl Client<'_> {
     fn auth_disabled(&mut self) {
         self.auth_state = match replace(&mut self.auth_state, AuthState::Errored) {
             AuthState::Initial => AuthState::AuthDisabled,

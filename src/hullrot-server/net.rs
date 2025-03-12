@@ -824,7 +824,7 @@ pub struct Everyone<'a, 'b: 'a, 'cfg: 'b>(
     &'a mut [&'b mut Connection<'cfg>],
 );
 
-impl<'a, 'b, 'cfg> Everyone<'a, 'b, 'cfg> {
+impl<'b, 'cfg> Everyone<'_, 'b, 'cfg> {
     pub fn for_each<F: FnMut(&mut Client)>(&mut self, mut f: F) {
         for each in self.0.iter_mut() {
             f(&mut each.client);

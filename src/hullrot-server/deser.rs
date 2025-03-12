@@ -27,7 +27,7 @@ use serde::*;
 
 /// Deserialize 1 or 0 as true or false.
 struct BoolVisitor;
-impl<'de> de::Visitor<'de> for BoolVisitor {
+impl de::Visitor<'_> for BoolVisitor {
     type Value = bool;
 
     fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
@@ -63,7 +63,7 @@ pub fn as_bool<'de, D: Deserializer<'de>>(de: D) -> Result<bool, D::Error> {
 
 /// Deserialize any number as an i32.
 struct I32Visitor;
-impl<'de> de::Visitor<'de> for I32Visitor {
+impl de::Visitor<'_> for I32Visitor {
     type Value = i32;
 
     fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
@@ -97,7 +97,7 @@ impl<'de> Deserialize<'de> for ::ZGroup {
 
 /// Deserialize any number as a u16.
 struct U16Visitor;
-impl<'de> de::Visitor<'de> for U16Visitor {
+impl de::Visitor<'_> for U16Visitor {
     type Value = u16;
 
     fn expecting(&self, fmt: &mut fmt::Formatter) -> fmt::Result {

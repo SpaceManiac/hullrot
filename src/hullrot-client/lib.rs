@@ -37,8 +37,8 @@ use serde::Serialize;
 // ----------------------------------------------------------------------------
 // Foreign function interface
 
-thread_local!(static OUTPUT_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::new()));
-thread_local!(static HANDLE: RefCell<Option<Handle>> = RefCell::new(None));
+thread_local!(static OUTPUT_BUFFER: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) });
+thread_local!(static HANDLE: RefCell<Option<Handle>> = const { RefCell::new(None) });
 
 fn with_output_buffer<F: FnOnce(&mut Vec<u8>)>(f: F) -> *const c_char {
     OUTPUT_BUFFER.with(|cell| {
