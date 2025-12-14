@@ -97,7 +97,7 @@ unsafe fn parse_args<'a>(argc: &'a c_int, argv: &'a *const *const c_char) -> Vec
 macro_rules! function {
     ($name:ident($($args:ident)*) $body:block) => {
         #[no_mangle]
-        pub extern fn $name(_argc: c_int, _argv: *const *const c_char) -> *const c_char {
+        pub extern "C" fn $name(_argc: c_int, _argv: *const *const c_char) -> *const c_char {
             $(let $args = unsafe { &parse_args(&_argc, &_argv)[..] };)*
             $body
         }
