@@ -96,7 +96,7 @@ impl Config {
     /// Save the config to a file.
     fn save(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         let mut file = File::create(path)?;
-        file.write_all(&toml::ser::to_vec(&SerRoot { hullrot: self })?)?;
+        file.write_all(toml::to_string(&SerRoot { hullrot: self })?.as_bytes())?;
         Ok(())
     }
 }
@@ -144,7 +144,7 @@ impl AuthDB {
     }
 
     fn save(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        File::create(path)?.write_all(&toml::ser::to_vec(&*self.assoc.borrow())?)?;
+        File::create(path)?.write_all(toml::to_string(&*self.assoc.borrow())?.as_bytes())?;
         Ok(())
     }
 
