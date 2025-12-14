@@ -9,7 +9,7 @@ path = "lib.rs"
 [dependencies]
 protobuf = "3.7.2"
 byteorder = "1.1.0"
-bitflags = "1.0.1"
+bitflags = "2.10.0"
 
 [build-dependencies]
 protobuf-codegen = "3.7.2"

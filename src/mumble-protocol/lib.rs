@@ -140,8 +140,8 @@ bitflags! {
         /// Register and unregister users. Only valid on root channel.
         const REGISTER_SELF = 0x80000;
 
-        const DEFAULT = Self::TRAVERSE.bits | Self::ENTER.bits |
-            Self::SPEAK.bits | Self::WHISPER.bits | Self::TEXT_MESSAGE.bits |
-            Self::REGISTER_SELF.bits;
+        const DEFAULT = Self::TRAVERSE.bits() | Self::ENTER.bits() |
+            Self::SPEAK.bits() | Self::WHISPER.bits() | Self::TEXT_MESSAGE.bits() |
+            Self::REGISTER_SELF.bits();
     }
 }
