@@ -793,7 +793,12 @@ struct Connection<'cfg> {
 }
 
 impl<'cfg> Connection<'cfg> {
-    fn new(config: &'cfg Config, session: u32, remote: SocketAddr, stream: Stream) -> Connection<'cfg> {
+    fn new(
+        config: &'cfg Config,
+        session: u32,
+        remote: SocketAddr,
+        stream: Stream,
+    ) -> Connection<'cfg> {
         let (tx, rx) = mpsc::channel();
         let decoder = Decoder::new(SAMPLE_RATE, CHANNELS).unwrap();
         Connection {
