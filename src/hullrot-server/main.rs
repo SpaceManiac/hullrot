@@ -478,7 +478,7 @@ impl<'cfg> Client<'cfg> {
         session: u32,
     ) -> Client<'cfg> {
         sender.send(packet! { Version;
-            set_version: 0x10300,
+            set_version_v1: 0x10300,
             set_release: concat!("Hullrot v", env!("CARGO_PKG_VERSION")).to_owned(),
             set_os: std::env::consts::FAMILY.into(),
             set_os_version: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
