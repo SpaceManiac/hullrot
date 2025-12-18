@@ -1,0 +1,19 @@
+#!/bin/bash
+set -euo pipefail
+
+rm -rf target/dist
+
+export CMAKE_POLICY_VERSION_MINIMUM=3.5  # https://github.com/Lakelezz/audiopus_sys/pull/23
+cargo build --release --target=i686-unknown-linux-gnu -p hullrot-client
+cargo build --release --target=x86_64-unknown-linux-gnu -p hullrot-server
+cargo build --release --target=i686-pc-windows-gnu -p hullrot-client
+cargo build --release --target=x86_64-pc-windows-gnu -p hullrot-server --features openssl/vendored
+
+mkdir -p target/dist
+cp \
+    target/i686-unknown-linux-gnu/release/libhullrot.so \
+    target/x86_64-unknown-linux-gnu/release/hullrot \
+    target/i686-pc-windows-gnu/release/hullrot.dll \
+    target/x86_64-pc-windows-gnu/release/hullrot.exe \
+    target/dist
+ls -l target/dist/*
