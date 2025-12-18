@@ -72,6 +72,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         } else if arg == "--license-mumble" {
             mumble_license();
             return Ok(());
+        } else if arg == "--license" {
+            license();
+            return Ok(());
         }
         config_path_owned = std::path::PathBuf::from(arg);
         config_path = &config_path_owned;
@@ -98,6 +101,8 @@ fn usage() {
 usage: hullrot [<config-file>]
     -h, --help, -V, --version
         show this help
+    --license
+        show the license for Hullrot
     --license-mumble
         show the license for the Mumble protocol definitions
 
@@ -118,6 +123,10 @@ along with Hullrot.  If not, see <http://www.gnu.org/licenses/>."
 
 fn mumble_license() {
     print!("{}", mumble_protocol::PROTOCOL_LICENSE);
+}
+
+fn license() {
+    print!("{}", include_str!("../../COPYING"));
 }
 
 const WELCOME: &str = "\
