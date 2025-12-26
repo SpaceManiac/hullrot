@@ -1,8 +1,8 @@
 [package]
 name = "hullrot-client"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Tad Hardesty <tad@platymuus.com>"]
-description = "dylib with BYOND-integrable "
+description = "dylib for BYOND to connect to Hullrot control channel"
 edition = "2015"
 
 [lib]
