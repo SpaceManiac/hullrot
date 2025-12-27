@@ -2,7 +2,7 @@
 
 /datum/config_entry/string/hullrot_control_addr
 	protection = CONFIG_ENTRY_LOCKED | CONFIG_ENTRY_HIDDEN
-	config_entry_value = "127.0.0.1:10961"
+	default = "127.0.0.1:10961"
 
 SUBSYSTEM_DEF(hullrot)
 	name = "Hullrot"
@@ -10,6 +10,7 @@ SUBSYSTEM_DEF(hullrot)
 	flags = SS_BACKGROUND
 	wait = 2
 	init_order = -50  // Very late initialize
+	runlevels = RUNLEVEL_LOBBY|RUNLEVELS_DEFAULT
 
 	var/const/dll_major = 0  // Major version must be exactly this
 	var/const/dll_minor = 1  // Minor version must be at least this
@@ -30,10 +31,10 @@ SUBSYSTEM_DEF(hullrot)
 /datum/controller/subsystem/hullrot/Initialize()
 	auth_statclick = new(null, "Connect to Hullrot and then click here to authenticate")
 	dll_connect()
-	return ..()
+	return (loaded_version && can_fire) ? SS_INIT_SUCCESS : SS_INIT_FAILURE
 
 /datum/controller/subsystem/hullrot/proc/lib()
-	return world.system_type == MS_WINDOWS ? "hullrot.dll" : "libhullrot.so"
+	return world.system_type == MS_WINDOWS ? "./hullrot.dll" : "./libhullrot.so"
 
 /datum/controller/subsystem/hullrot/proc/dll_connect()
 	// Load the DLL and check the version
@@ -46,13 +47,14 @@ SUBSYSTEM_DEF(hullrot)
 		return abort("[name] [dll_major].[dll_minor] was expected, but incompatible [version["version"]] was supplied.")
 	loaded_version = version["version"]
 
-	var/list/res = json_decode(call(lib(), "hullrot_init")(CONFIG_GET(string/hullrot_control_addr)))
+	var/list/res = json_decode(call_ext(lib(), "hullrot_init")(CONFIG_GET(string/hullrot_control_addr)))
 	var/error = res["error"] || res["Fatal"] || res["Debug"]
 	if (error || !res["Version"])
 		return abort("[name] failed to initialize: [error]")
 	server_version = res["Version"]["version"]
 	dead_because = null
 	log_world("[name] active: dll [loaded_version], server [server_version]")
+	initialized = TRUE
 
 	for (var/client/C in GLOB.clients)
 		check_connected(C)
@@ -61,10 +63,11 @@ SUBSYSTEM_DEF(hullrot)
 
 /datum/controller/subsystem/hullrot/proc/get_dll_version()
 	// In its own proc so if it crashes, dll_initialize can check for null.
-	return json_decode(call(lib(), "hullrot_dll_version")())
+	return json_decode(call_ext(lib(), "hullrot_dll_version")())
 
 /datum/controller/subsystem/hullrot/stat_entry(msg)
-	..(dead_because || "C:[loaded_version] S:[server_version]")
+	msg = dead_because || "C:[loaded_version] S:[server_version]"
+	return ..()
 
 // ----------------------------------------------------------------------------
 // Shutdown
@@ -72,7 +75,7 @@ SUBSYSTEM_DEF(hullrot)
 /datum/controller/subsystem/hullrot/Shutdown()
 	if (loaded_version)
 		loaded_version = null
-		call(lib(), "hullrot_stop")()
+		call_ext(lib(), "hullrot_stop")()
 
 // because the DLL starts a thread, we have to make *extra* sure to join it
 /world/Del()
@@ -109,14 +112,18 @@ SUBSYSTEM_DEF(hullrot)
 
 /datum/controller/subsystem/hullrot/vv_get_dropdown()
 	. = ..()
-	. += "---"
-	.["Restart"] = "?src=[REF(src)];[HrefToken()];restart=1"
+	VV_DROPDOWN_OPTION("", "---------")
+	VV_DROPDOWN_OPTION("restart", "Restart")
 
-/datum/controller/subsystem/hullrot/Topic(href, href_list)
-	if(..() || !check_rights(R_ADMIN, FALSE) || !usr.client.holder.CheckAdminHref(href, href_list))
+/datum/controller/subsystem/hullrot/vv_do_topic(list/href_list)
+	. = ..()
+
+	if(!.)
 		return
 
 	if(href_list["restart"])
+		if(!check_rights(R_ADMIN, FALSE))
+			return
 		restart()
 
 // ----------------------------------------------------------------------------
@@ -130,9 +137,9 @@ SUBSYSTEM_DEF(hullrot)
 	checked_events = TRUE
 	var/events
 	if (what)
-		events = json_decode(call(lib(), "hullrot_control")(json_encode(list("[what]" = data))))
+		events = json_decode(call_ext(lib(), "hullrot_control")(json_encode(list("[what]" = data))))
 	else
-		events = json_decode(call(lib(), "hullrot_control")())
+		events = json_decode(call_ext(lib(), "hullrot_control")())
 
 	// Handle the read events.
 	for (var/event in events)
@@ -193,7 +200,7 @@ SUBSYSTEM_DEF(hullrot)
 
 			var/image/bubble = speaker.hullrot_bubble
 			if (!bubble)
-				speaker.hullrot_bubble = bubble = image('icons/mob/talk.dmi', speaker.hullrot_audio_source(), "[speaker.bubble_icon]0", FLY_LAYER - 0.01)
+				speaker.hullrot_bubble = bubble = image('icons/mob/effects/talk.dmi', speaker.hullrot_audio_source(), "[speaker.bubble_icon]0", FLY_LAYER - 0.01)
 			else
 				bubble.icon_state = "[speaker.bubble_icon]0"
 				bubble.loc = speaker.hullrot_audio_source()

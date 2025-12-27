@@ -1,6 +1,8 @@
 // ----------------------------------------------------------------------------
 // Push-to-talk stat panel and key handling
 
+#define HULLROT_STAT_HEADER "— Radio ————————————————"
+
 /mob/living
 	var/list/hullrot_stats
 	var/hullrot_ptt
@@ -8,32 +10,36 @@
 	var/image/hullrot_bubble
 	var/hullrot_needs_update = FALSE
 
-/mob/living/Stat()
-	..()
+/mob/living/get_status_tab_items()
+	. = ..()
 	if (client && SShullrot.initialized && SShullrot.can_fire && hullrot_radio_allowed())
-		statpanel("Radio")  // process on the regular even if it's invisible
 		var/list/keys_used = list()
 
 		if (!client.hullrot_authed)
-			stat(null, SShullrot.auth_statclick)
+			. += HULLROT_STAT_HEADER
+			. += list(list("Authenticate: ", SShullrot.auth_statclick.name, "src=\ref[SShullrot.auth_statclick];statpanel_item_click=left"))
+			. += ""
+			return
+		else if (!hullrot_radio_allowed())
 			return
 
+		. += HULLROT_STAT_HEADER
 		var/turf/T = get_turf(src)
-		for (var/obj/item/radio/R in view(1))
+		for (var/obj/item/radio/R in view(1, src))
 			if (!istype(R, /obj/item/radio/intercom) && !(R in src))
 				continue  // can't talk into a non-intercom you're not holding
-			if (!R.on || R.wires.is_cut(WIRE_TX) || (istype(R, /obj/item/radio/headset) && !R.listening))
-				stat(null, "\the [R] (off)")
+			if (!R.is_on() || R.wires.is_cut(WIRE_TX) || (istype(R, /obj/item/radio/headset) && !R.get_broadcasting()))
+				. += "\the [R] (off)"
 				continue  // can't talk into a disabled radio
-			if (R.subspace_transmission && !R.independent && (!SShullrot.subspace_groups || !SShullrot.subspace_groups["[T.z]"]))
-				stat(null, "\the [R] (not responding)")
+			if (R.subspace_transmission && (!SShullrot.subspace_groups || !SShullrot.subspace_groups["[T.z]"]))
+				. += "\the [R] (not responding)"
 				continue  // can't talk into headsets while comms are down
 
-			stat(null, "\the [R]")
-			hullrot_stat(keys_used, R, "Tuner", R.frequency)
+			. += "\the [R]"
+			hullrot_stat(., keys_used, R, "Tuner", R.get_frequency())
 			for (var/channel in R.channels)
 				if (R.channels[channel])
-					hullrot_stat(keys_used, R, channel, GLOB.radiochannels[channel])
+					hullrot_stat(., keys_used, R, channel, GLOB.default_radio_channels[channel])
 
 		hullrot_stats &= keys_used
 		if (keys_used.len)
@@ -47,9 +53,11 @@
 		if (client.keys_held["V"])
 			ptt_tick()
 
+		. += ""
+
 /mob/living/proc/ptt_tick()
 	var/ptt_freq
-	if (hullrot_radio_allowed() && !incapacitated(ignore_grab = TRUE))
+	if (hullrot_radio_allowed() && !(incapacitated & ~INCAPABLE_GRAB))
 		var/obj/effect/statclick/radio/current = hullrot_ptt && hullrot_stats[hullrot_ptt]
 		ptt_freq = current && current.freq
 
@@ -57,7 +65,7 @@
 		hullrot_cache["ptt_freq"] = ptt_freq
 		SShullrot.set_ptt(client, ptt_freq)
 
-/mob/living/proc/hullrot_stat(keys_used, radio, channel, frequency)
+/mob/living/proc/hullrot_stat(output, keys_used, radio, channel, frequency)
 	var/key = "[REF(radio)]:[channel]"
 	if (hullrot_ptt == null)
 		hullrot_ptt = key
@@ -69,7 +77,7 @@
 		O.key = key
 	O.freq = frequency
 	O.name = (hullrot_ptt == key) ? "Active - hold V to talk" : "Available"
-	stat(channel, O)
+	output += list(list("• [channel]: ", O.name, "src=\ref[O];statpanel_item_click=left"))
 
 /obj/effect/statclick/radio
 	var/key
@@ -136,16 +144,19 @@
 /client
 	var/obj/effect/statclick/dead_radio/hullrot_hear_all
 
-/mob/dead/Stat()
-	..()
+/mob/dead/get_status_tab_items()
+	. = ..()
 	if (client && SShullrot.initialized && SShullrot.can_fire)
-		if (!client.hullrot_authed && statpanel("Radio"))
-			stat(null, SShullrot.auth_statclick)
-			return
-		if (check_rights_for(client, R_ADMIN) && statpanel("Radio"))
+		if (!client.hullrot_authed)
+			. += HULLROT_STAT_HEADER
+			. += list(list("Authenticate: ", SShullrot.auth_statclick.name, "src=\ref[SShullrot.auth_statclick];statpanel_item_click=left"))
+			. += ""
+		else if (check_rights_for(client, R_ADMIN))
 			if (!client.hullrot_hear_all)
 				client.hullrot_hear_all = new(null, "Disabled (click to toggle)")
-			stat("Ghost Ears", client.hullrot_hear_all)
+			. += HULLROT_STAT_HEADER
+			. += list(list("Ghost ears: ", client.hullrot_hear_all.name, "src=\ref[client.hullrot_hear_all];statpanel_item_click=left"))
+			. += ""
 
 // ----------------------------------------------------------------------------
 // Location-based can-hear and can-speak checks
@@ -169,8 +180,8 @@
 		.["is_admin"] = admin
 
 	// Mob-level speaking and hearing
-	var/can_speak = (can_speak_basic(ignore_spam = TRUE) && can_speak_vocal() && (stat == CONSCIOUS || stat == SOFT_CRIT)) || 0
-	var/can_hear = (can_hear() && (stat == CONSCIOUS || stat == SOFT_CRIT)) || 0
+	var/can_speak = (can_speak() && (stat == CONSCIOUS || stat == SOFT_CRIT)) || FALSE
+	var/can_hear = (can_hear() && (stat == CONSCIOUS || stat == SOFT_CRIT)) || FALSE
 	if (cache["can_speak"] != can_speak)
 		cache["can_speak"] = can_speak
 		.["mute"] = !can_speak
@@ -183,14 +194,15 @@
 	// Languages
 	var/datum/language_holder/langs = get_language_holder()
 	var/list/language_names = list()
-	for (var/L in langs.languages)
+	for (var/L in langs.understood_languages)
 		language_names += "[L]"
 	var/stringified = list2params(language_names)
 	if (cache["lang_known"] != stringified)
 		cache["lang_known"] = stringified
 		.["known_languages"] = language_names
 
-	var/default_name = "[get_default_language()]"
+	var/datum/language/default_lang = langs.get_selected_language()
+	var/default_name = "[default_lang]"
 	if (cache["lang_speaking"] != default_name)
 		cache["lang_speaking"] = default_name
 		.["current_language"] = default_name
@@ -236,20 +248,20 @@
 	// Hot and heard radio frequencies
 	var/list/hot_freqs = list()
 	var/list/hear_freqs = list()
-	for(var/obj/item/radio/R in hearers)
-		if (get_dist(audio_source, R) > R.canhear_range || !R.on)
+	for(var/obj/item/radio/R in (hearers | src.contents))
+		if (get_dist(audio_source, R) > R.canhear_range || !R.is_on())
 			continue
-		if (R.subspace_transmission && !R.independent && (!SShullrot.subspace_groups || !SShullrot.subspace_groups["[T.z]"]))
+		if (R.subspace_transmission && (!SShullrot.subspace_groups || !SShullrot.subspace_groups["[T.z]"]))
 			continue
 
-		if (can_speak && R.broadcasting && (!R.wires || !R.wires.is_cut(WIRE_TX)) && get_dist(audio_source, R) <= speak_range)
-			hot_freqs |= R.frequency
+		if (can_speak && (R.get_broadcasting() && !istype(R, /obj/item/radio/headset)) && (!R.wires || !R.wires.is_cut(WIRE_TX)) && get_dist(audio_source, R) <= speak_range)
+			hot_freqs |= R.get_frequency()
 
-		if (can_hear && R.listening && (!R.wires || !R.wires.is_cut(WIRE_RX)) && R.can_receive(R.frequency, list(R.z)))
-			hear_freqs |= R.frequency
+		if (can_hear && R.get_listening() && (!R.wires || !R.wires.is_cut(WIRE_RX)) && R.can_receive(R.get_frequency(), list(T.z)))
+			hear_freqs |= R.get_frequency()
 			for (var/channel in R.channels)
 				if (R.channels[channel])
-					hear_freqs |= GLOB.radiochannels[channel]
+					hear_freqs |= GLOB.default_radio_channels[channel]
 
 	var/new_hot = list2params(hot_freqs)
 	var/new_hear = list2params(hear_freqs)
@@ -273,6 +285,12 @@
 	. = ..()
 	if(. && client)
 		hullrot_needs_update = TRUE
+
+// Radios must always be hearing sensitive because we cheat by looking for "hearers" to find what radios a mob can hear.
+/obj/item/radio/Initialize()
+	. = ..()
+	if (!istype(src, /obj/item/radio/headset))
+		become_hearing_sensitive("hullrot")
 
 /obj/item/radio/equipped(mob/living/user, slot)
 	..()
@@ -314,7 +332,7 @@
 		hullrot_update()
 
 /mob/dead/Login()
-	..()
+	. = ..()
 	SShullrot.set_ghost(client)
 
 /obj/machinery/door/open()
@@ -340,9 +358,11 @@
 	return mainframe == null
 
 /mob/living/proc/hullrot_audio_source()
-	var/mob/camera/aiEye/remote/holo/holoEye = remote_control
+	var/mob/eye/camera/remote/holo/holoEye = remote_control
 	if (istype(holoEye))
-		return holoEye.origin
+		var/origin = holoEye.origin_ref?.resolve()
+		if (origin)
+			return origin
 	return src
 
 /mob/living/silicon/ai/hullrot_audio_source()
@@ -360,13 +380,14 @@
 	// Intended to mimic compose_mesage() from saycode
 	var/spanpart1 = "<span class='[radio_freq ? get_radio_span(radio_freq) : "game say"]'>"
 	var/spanpart2 = "<span class='name'>"
-	var/freqpart = radio_freq ? "\[[get_radio_name(radio_freq)]\] " : ""
-	var/namepart = "[speaker.GetVoice()][speaker.get_alt_name()]"
+	// Use allinone as a way to get the channel name. Not yet compatible with customizing channel names at telecomms.
+	var/freqpart = radio_freq ? "\[[get_radio_name(radio_freq, /obj/machinery/telecomms/allinone::frequency_infos["[radio_freq]"]["name"])]\] " : ""
+	var/namepart = speaker.get_message_voice()
 	var/endspanpart = "</span>"
 
 	//Message
 	var/datum/language/D = GLOB.language_datum_instances[message_language]
-	var/verbpart = D.get_spoken_verb()
+	var/verbpart = speaker.verb_say
 	if (verbpart == "says")
 		verbpart = "speaks"
 
@@ -381,3 +402,5 @@
 		languageicon = "[D.get_icon()] "
 
 	return "[spanpart1][spanpart2][freqpart][languageicon][compose_track_href(speaker, namepart)][namepart][compose_job(speaker, message_language, null, radio_freq)][endspanpart][messagepart]"
+
+#undef HULLROT_STAT_HEADER
