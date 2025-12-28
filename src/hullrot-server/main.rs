@@ -281,6 +281,8 @@ struct MobState {
     hot_freqs: HashSet<Freq>,
     /// Radio channels which the mob can hear, e.g. 1459 for common
     hear_freqs: HashSet<Freq>,
+    /// Disables location-based restriction when z == 0 (observer)
+    ghost_ears: bool,
 }
 
 #[derive(Debug, Default, Deserialize, Clone)]
@@ -293,6 +295,7 @@ struct MobStatePatch {
     local_with: Option<HashSet<String>>,
     hot_freqs: Option<HashSet<Freq>>,
     hear_freqs: Option<HashSet<Freq>>,
+    ghost_ears: Option<Bool>,
 }
 
 impl MobState {
@@ -307,7 +310,7 @@ impl MobState {
         }
         fields! {
             z, mute, deaf, current_language, known_languages,
-            local_with, hot_freqs, hear_freqs,
+            local_with, hot_freqs, hear_freqs, ghost_ears,
         }
     }
 }
@@ -396,6 +399,7 @@ impl<'cfg> Server<'cfg> {
                         push_to_talk: None,
                         hot_freqs: once(DEADCHAT).collect(),
                         hear_freqs: once(DEADCHAT).collect(),
+                        ghost_ears: c.mob.ghost_ears,
                     };
                 }),
                 ControlIn::Register { cert_hash, ckey } => {
@@ -474,8 +478,6 @@ pub struct Client<'cfg> {
 
     speaking: bool,  // whether our speech bubble is currently being shown
     self_deaf: bool, // deafened in the Mumble client
-    /// Disables location-based restriction when z == 0 (observer)
-    ghost_ears: bool,
     mob: MobState,
 }
 
@@ -509,7 +511,6 @@ impl<'cfg> Client<'cfg> {
             events: VecDeque::new(),
             speaking: false,
             self_deaf: false,
-            ghost_ears: false,
 
             mob: MobState {
                 z: Z(0),
@@ -521,6 +522,7 @@ impl<'cfg> Client<'cfg> {
                 push_to_talk: None,
                 hot_freqs: HashSet::new(),
                 hear_freqs: HashSet::new(),
+                ghost_ears: false,
             },
         }
     }
@@ -743,7 +745,7 @@ impl<'cfg> Client<'cfg> {
                                 );
                             }
                         }
-                        if other.ghost() && other.ghost_ears {
+                        if other.ghost() && other.mob.ghost_ears {
                             heard = true;
                         }
                         if heard
